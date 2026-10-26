@@ -19,9 +19,14 @@ Spotless와 커밋 훅, CI, 환경/비밀 설정, 배포·복구 절차.
 - 두 번째 커밋 8d280aa: CI와 운영 규칙. 세 번째 커밋 4f077eb: 비밀정보 차단. 각 커밋의 전체 검증 통과
 - 실제 .env의 비밀값 2개는 기존 전체 이력에 없음을 확인. Gitleaks 이력·staged 검사에서 발견 0건
 - 실제 .env는 gitignore와 dockerignore로 제외, 예제 파일에는 예시만 유지. private 상태여도 공개 저장소 기준으로 관리
-- 최초 비공개 push는 로컬 Git 인증이 없어 실패. GitHub CLI 공식 웹 로그인 승인 대기 중
-- 원격 CI 실행·main 브랜치 보호 적용은 최초 업로드 대기 중
+- GitHub CLI 로그인 완료. main에 최초 기준 커밋과 setup/bootstrap 브랜치 업로드 완료
+- PR: https://github.com/dpyorang/logscope/pull/1
+- 최초 PR CI 성공: https://github.com/dpyorang/logscope/actions/runs/40322093911 (소스 e3c3e24)
+- main 보호 조회 API가 HTTP 403을 반환: 현재 플랜에서 private 저장소 보호는 GitHub Pro 필요. private 유지, 보호 정책 파일은 준비됐으나 실제 원격 강제 적용 없음
+- 로컬 백업·격리 복원 리허설 성공: MySQL 8.4.13 덤프 → 별도 DB 복원 → Flyway V1 성공 확인 → 복원 DB 사용 앱 readiness HTTP 200/UP. 검증용 임시 컨테이너는 정리함
 - 운영 배포 대상/registry/DB/secret manager가 미지정. 실제 배포·복구 리허설 없음
+
+남은 작업: 최종 PR CI 확인과 리뷰/병합, GitHub Pro 등 private 브랜치 보호 지원 플랜 준비 후 정책 적용·조회, 운영 배포 대상 확정.
 
 예정 커밋 단위(각 커밋 직전 전체 검증 필수):
 

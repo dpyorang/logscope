@@ -17,6 +17,10 @@ GitHub 플랜/공개 여부에 따른 보호 지원 여부도 실제 적용 결�
 저장된 정책을 적용하고 조회한다. 기존 저장소라면 기존 브랜치/보호 정책을 먼저 조회하여
 의도하지 않은 정책 약화가 없는지 확인한다. 이 스크립트는 아직 실행되지 않았다.
 
+2026-10-26 실제 조회 결과: 현재 계정 플랜에서 private 저장소의 main 보호 API가
+HTTP 403과 GitHub Pro 필요 응답을 반환했다. private는 유지한다. 플랜 변경 후
+정책을 적용하고 재조회하기 전까지 원격 보호가 구성되었다고 간주하지 않는다.
+
 ## 환경과 비밀
 
 저장소는 현재 private이며 향후 public 전환을 전제로 관리한다. 실제 `.env`는
@@ -87,6 +91,11 @@ mysql --defaults-extra-file=/secure/restore.cnf logmonitoring < backups/logmonit
 restore.cnf가 격리된 대상인지 두 번째 담당자가 확인한다. 복원된 DB에서 해당 이미지로
 앱을 시작해 Flyway 검증, 테이블/레코드 수, readiness를 확인한다.
 운영 채택 전 RPO/RTO, 자동 백업 주기, 보존 기간, PITR/binlog 정책을 결정한다.
+
+2026-10-26 로컬 리허설: 동일한 mysqldump 옵션으로 개발 DB를 덤프하고 호스트 포트를
+열지 않은 별도 MySQL 8.4.13에 복원했다. Flyway history의 V1/success=1과 복원 DB에
+연결한 앱 readiness HTTP 200/UP를 확인한 뒤 임시 컨테이너를 정리했다. 도메인 데이터가
+없는 초기 스키마에 대한 결과이므로 실제 운영 데이터 복구 성능 검증을 대체하지 않는다.
 
 ## 실패 시 복구
 
