@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
 ./scripts/check-secrets.sh
-./mvnw -B -ntp clean verify
+./gradlew --no-daemon --console=plain clean build
 docker compose --env-file .env.example config --quiet
 docker build --tag logscope:verify .

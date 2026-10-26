@@ -6,7 +6,7 @@
 실제 사용자가 접속할 서버에 올리는 운영 배포는 서버·도메인·registry·운영 DB·
 secret manager가 결정된 뒤 별도로 진행한다. 로컬 readiness 성공은 운영 배포 완료를 뜻하지 않는다.
 
-프로젝트·Java 패키지·앱·Maven 산출물·Compose·로컬 DB 이름은 logscope다.
+프로젝트·Java 패키지·앱·Gradle 산출물·Compose·로컬 DB 이름은 logscope다.
 2026-10-26 이름 변경 시 기존 개발 DB를 백업하여 새 logscope DB에 복원했고,
 이전 컨테이너는 중지하되 기존 Docker 볼륨은 삭제하지 않았다. 로컬 폴더 경로와
 Codex 표시 이름은 코드 이름과 별개다. 앱에 연결된 경로는 프로젝트 설정과 함께 변경해야 한다.

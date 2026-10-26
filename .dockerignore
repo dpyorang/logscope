@@ -2,6 +2,8 @@
 .env*
 secrets
 backups
-target
+build
+.gradle
+.kotlin
 .idea
 .vscode

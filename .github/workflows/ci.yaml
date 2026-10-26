@@ -21,10 +21,12 @@ jobs:
         with:
           distribution: temurin
           java-version: '25'
-          cache: maven
+          cache: gradle
       - run: ./scripts/verify.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
           name: test-reports
-          path: target/surefire-reports/
+          path: |
+            build/test-results/test/
+            build/reports/tests/test/
