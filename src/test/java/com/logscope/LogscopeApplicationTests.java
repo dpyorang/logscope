@@ -1,4 +1,4 @@
-package com.logmonitoring;
+package com.logscope;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -13,7 +13,7 @@ import org.springframework.test.context.ActiveProfiles;
 @Import(TestcontainersConfiguration.class)
 @SpringBootTest
 @ActiveProfiles("test")
-class LogmonitoringApplicationTests {
+class LogscopeApplicationTests {
 
   @Autowired JdbcTemplate jdbc;
   @Autowired Flyway flyway;

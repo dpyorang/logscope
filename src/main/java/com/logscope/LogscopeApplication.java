@@ -1,12 +1,12 @@
-package com.logmonitoring;
+package com.logscope;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
 @SpringBootApplication
-public class LogmonitoringApplication {
+public class LogscopeApplication {
 
   public static void main(String[] args) {
-    SpringApplication.run(LogmonitoringApplication.class, args);
+    SpringApplication.run(LogscopeApplication.class, args);
   }
 }

@@ -1,7 +1,10 @@
-# logmonitoring
+# logscope
 
 Java 25 · Spring Boot 4.1.2 · Boot 관리 JPA/Flyway · MySQL 8.4.13 LTS.
 초기 인프라 설정 단계이며 도메인 기능은 아직 없다.
+
+Maven 좌표는 `com.logscope:logscope`, Java 패키지는 `com.logscope`이며,
+Compose 프로젝트·로컬 DB·앱 이름도 `logscope`로 통일한다.
 
 ## 로컬 실행
 

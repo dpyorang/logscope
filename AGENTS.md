@@ -1,5 +1,7 @@
 # 공통 작업 규칙
 
+- 프로젝트 이름은 logscope, Maven 좌표는 com.logscope:logscope, 기본 Java 패키지는 com.logscope다.
+
 - 초기 세팅의 실제 검증·GitHub 연결·브랜치 보호 확인이 끝나기 전 도메인 기능을 구현하지 않는다.
 - Java 25, Spring Boot 4.1.2, MySQL 8.4.13 LTS를 사용한다. JPA, Hibernate, JDBC, Flyway, Testcontainers는 Boot BOM 버전을 따른다.
 - Maven Wrapper만 사용한다. 기능 단위 Conventional Commit을 작성한다.

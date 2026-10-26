@@ -15,16 +15,20 @@ Spotless와 커밋 훅, CI, 환경/비밀 설정, 배포·복구 절차.
 - Git 2.39.5 설치 확인. 로컬 setup/bootstrap 브랜치로 초기화하고 origin 및 커밋 검증 훅 연결 완료
 - 첫 커밋 40e4109: 기본 실행 환경. 커밋 훅의 전체 검증 통과
 - 로컬 Compose 기동 성공. readiness HTTP 200 및 `{"status":"UP"}` 확인
-- 대상 GitHub: https://github.com/dpyorang/logscope (사용자 지정). 사용자 직접 private 전환 후 API의 private=true 확인 완료. GitHub 연동과 admin/push 권한 확인, 원격 브랜치는 아직 없음
+- 대상 GitHub: https://github.com/dpyorang/logscope (사용자 지정). 사용자 직접 private 전환 후 API의 private=true 확인 완료. GitHub 연동과 admin/push 권한 확인
 - 두 번째 커밋 8d280aa: CI와 운영 규칙. 세 번째 커밋 4f077eb: 비밀정보 차단. 각 커밋의 전체 검증 통과
 - 실제 .env의 비밀값 2개는 기존 전체 이력에 없음을 확인. Gitleaks 이력·staged 검사에서 발견 0건
 - 실제 .env는 gitignore와 dockerignore로 제외, 예제 파일에는 예시만 유지. private 상태여도 공개 저장소 기준으로 관리
 - GitHub CLI 로그인 완료. main에 최초 기준 커밋과 setup/bootstrap 브랜치 업로드 완료
 - PR: https://github.com/dpyorang/logscope/pull/1
 - 최초 PR CI 성공: https://github.com/dpyorang/logscope/actions/runs/40322093911 (소스 e3c3e24)
+- 문서 보강 후 CI도 성공: https://github.com/dpyorang/logscope/actions/runs/40322614004 (소스 03aa11e)
 - main 보호 조회 API가 HTTP 403을 반환: 현재 플랜에서 private 저장소 보호는 GitHub Pro 필요. private 유지, 보호 정책 파일은 준비됐으나 실제 원격 강제 적용 없음
 - 로컬 백업·격리 복원 리허설 성공: MySQL 8.4.13 덤프 → 별도 DB 복원 → Flyway V1 성공 확인 → 복원 DB 사용 앱 readiness HTTP 200/UP. 검증용 임시 컨테이너는 정리함
 - 운영 배포 대상/registry/DB/secret manager가 미지정. 실제 배포·복구 리허설 없음
+- 사용자는 운영 배포 대상이 미정이라고 확인했다. 현재 범위는 이 Mac의 로컬 실행 검증이며 실제 운영 배포는 보류한다
+- 프로젝트 이름을 logscope로 변경: Maven 좌표/Java 패키지/클래스/앱/Compose/로컬 DB/문서. 기존 DB 백업과 이전 볼륨은 보존한다
+- Codex 프로젝트 표시 이름 변경은 전용 도구 미제공 및 앱 화면 조작 안전 제한으로 자동 수행 불가. 현재 로컬 폴더 경로도 앱 연결을 보존하기 위해 유지한다
 
 남은 작업: 최종 PR CI 확인과 리뷰/병합, GitHub Pro 등 private 브랜치 보호 지원 플랜 준비 후 정책 적용·조회, 운영 배포 대상 확정.
 

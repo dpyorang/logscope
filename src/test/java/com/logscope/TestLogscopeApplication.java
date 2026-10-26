@@ -1,11 +1,11 @@
-package com.logmonitoring;
+package com.logscope;
 
 import org.springframework.boot.SpringApplication;
 
-public class TestLogmonitoringApplication {
+public class TestLogscopeApplication {
 
   public static void main(String[] args) {
-    SpringApplication.from(LogmonitoringApplication::main)
+    SpringApplication.from(LogscopeApplication::main)
         .with(TestcontainersConfiguration.class)
         .run(args);
   }

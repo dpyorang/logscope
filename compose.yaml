@@ -1,8 +1,9 @@
+name: logscope
 services:
   db:
     image: mysql:8.4.13
     environment:
-      MYSQL_DATABASE: logmonitoring
+      MYSQL_DATABASE: logscope
       MYSQL_USER: ${DB_USERNAME:?Set DB_USERNAME}
       MYSQL_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD}
@@ -11,7 +12,7 @@ services:
     volumes:
       - mysql-data:/var/lib/mysql
     healthcheck:
-      test: ["CMD-SHELL", 'MYSQL_PWD="$$MYSQL_PASSWORD" mysql -h 127.0.0.1 -u "$$MYSQL_USER" -D logmonitoring -e "SELECT 1"']
+      test: ["CMD-SHELL", 'MYSQL_PWD="$$MYSQL_PASSWORD" mysql -h 127.0.0.1 -u "$$MYSQL_USER" -D logscope -e "SELECT 1"']
       interval: 5s
       timeout: 5s
       retries: 30

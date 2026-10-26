@@ -1,5 +1,16 @@
 # 운영 및 복구 절차
 
+## 현재 실행 범위
+
+현재는 개발자 Mac에서 Docker로 앱과 MySQL을 실행하는 로컬 검증 단계다.
+실제 사용자가 접속할 서버에 올리는 운영 배포는 서버·도메인·registry·운영 DB·
+secret manager가 결정된 뒤 별도로 진행한다. 로컬 readiness 성공은 운영 배포 완료를 뜻하지 않는다.
+
+프로젝트·Java 패키지·앱·Maven 산출물·Compose·로컬 DB 이름은 logscope다.
+2026-10-26 이름 변경 시 기존 개발 DB를 백업하여 새 logscope DB에 복원했고,
+이전 컨테이너는 중지하되 기존 Docker 볼륨은 삭제하지 않았다. 로컬 폴더 경로와
+Codex 표시 이름은 코드 이름과 별개다. 앱에 연결된 경로는 프로젝트 설정과 함께 변경해야 한다.
+
 ## GitHub 연결과 보호
 
 실제 저장소 소유자/이름을 확정하고 GitHub CLI 로그인 또는 연결 도구가 필요하다.
@@ -75,8 +86,8 @@ umask 077
 mkdir -p backups
 mysqldump --defaults-extra-file=/secure/backup.cnf \
   --single-transaction --routines --triggers --events \
-  --no-tablespaces --set-gtid-purged=OFF logmonitoring > backups/logmonitoring.sql
-shasum -a 256 backups/logmonitoring.sql > backups/logmonitoring.sql.sha256
+  --no-tablespaces --set-gtid-purged=OFF logscope > backups/logscope.sql
+shasum -a 256 backups/logscope.sql > backups/logscope.sql.sha256
 ```
 
 덤프와 같은 시점에 DDL을 실행하지 않는다. 파일을 암호화하여 외부 백업 저장소로 전송하고
@@ -84,8 +95,8 @@ shasum -a 256 backups/logmonitoring.sql > backups/logmonitoring.sql.sha256
 별도 빈 MySQL 8.4.13 인스턴스에 복원한다(운영 대상에는 실행 금지).
 
 ```sh
-shasum -a 256 -c backups/logmonitoring.sql.sha256
-mysql --defaults-extra-file=/secure/restore.cnf logmonitoring < backups/logmonitoring.sql
+shasum -a 256 -c backups/logscope.sql.sha256
+mysql --defaults-extra-file=/secure/restore.cnf logscope < backups/logscope.sql
 ```
 
 restore.cnf가 격리된 대상인지 두 번째 담당자가 확인한다. 복원된 DB에서 해당 이미지로

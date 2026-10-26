@@ -1,6 +1,6 @@
 spring:
   application:
-    name: logmonitoring
+    name: logscope
   datasource:
     url: ${DB_URL}
     username: ${DB_USERNAME}
