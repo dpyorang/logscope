@@ -1,4 +1,5 @@
 # Standalone production definition; do not merge with compose.yaml.
+name: logscope
 services:
   app:
     image: ${APP_IMAGE:?Set an immutable registry image digest}
