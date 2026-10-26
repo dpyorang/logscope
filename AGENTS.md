@@ -1,13 +1,13 @@
 # 공통 작업 규칙
 
-- 프로젝트 이름은 logscope, Maven 좌표는 com.logscope:logscope, 기본 Java 패키지는 com.logscope다.
+- 프로젝트 이름은 logscope, 프로젝트 좌표는 com.logscope:logscope, 기본 Java 패키지는 com.logscope다.
 
 - 초기 세팅의 실제 검증·GitHub 연결·브랜치 보호 확인이 끝나기 전 도메인 기능을 구현하지 않는다.
 - Java 25, Spring Boot 4.1.2, MySQL 8.4.13 LTS를 사용한다. JPA, Hibernate, JDBC, Flyway, Testcontainers는 Boot BOM 버전을 따른다.
-- Maven Wrapper만 사용한다. 기능 단위 Conventional Commit을 작성한다.
+- Gradle 9.8.2 Wrapper와 Kotlin DSL만 사용한다. 기능 단위 Conventional Commit을 작성한다.
 - 매 커밋 직전 `./scripts/verify.sh`가 성공해야 한다. 빌드, 실제 MySQL Testcontainers 테스트, Spotless 검사, Compose 검증 및 이미지 빌드 실패 시 커밋하지 않는다.
 - `git config core.hooksPath .githooks`를 설정한다. `--no-verify`, 테스트 스킵, Docker 미사용 시 테스트 자동 생략을 금지한다.
-- 포맷 수정: `./mvnw spotless:apply`. 변경 후 전체 검증을 다시 실행한다.
+- 포맷 수정: `./gradlew spotlessApply`. 변경 후 전체 검증을 다시 실행한다.
 - main 직접 푸시와 강제 푸시를 금지하고 PR과 CI `verify`를 통해 병합한다. 빈 원격 저장소에 최초 기준 커밋을 만드는 경우만 검증 통과 후 main을 생성할 수 있다.
 - GitHub Actions는 지원 중인 공식 릴리스의 전체 커밋 SHA로 고정하고, 실행 OS는 명시적 버전으로 지정한다. 갱신 시 공식 릴리스와 CI 결과를 확인한다.
 - 스키마 변경은 새 Flyway migration으로만 수행한다. 적용된 파일 수정, ddl-auto update/create, 운영 clean/repair를 금지한다.

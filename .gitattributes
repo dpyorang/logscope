@@ -1,2 +1,4 @@
-/mvnw text eol=lf
-*.cmd text eol=crlf
+/gradlew text eol=lf
+*.bat text eol=crlf
+*.kts text eol=lf
+gradle/wrapper/gradle-wrapper.jar binary
