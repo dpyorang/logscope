@@ -29,6 +29,9 @@ git config core.hooksPath .githooks
 검증에는 Docker가 필수다. Testcontainers는 실제 MySQL에 대해 컨텍스트 시작,
 Flyway 적용·검증·재실행과 연결을 확인한다. 포맷 검사는 Maven validate 단계에 결합되어 있다.
 커밋은 검증 성공 후 기능별로 나눈다. CI도 같은 스크립트를 실행한다.
+비공개 저장소에서도 공개를 전제로 비밀값을 제외한다. `.env.example`은 예시만 포함하며,
+실제 `.env`는 Git 및 Docker 빌드 컨텍스트에서 제외한다. Gitleaks가 staged 변경과
+전체 이력을 로컬에서 검사하고, 금지 파일이 추적되면 커밋을 막는다.
 
 운영 구성과 GitHub 설정은 [운영 절차](docs/operations.md), 공통 규칙은 [AGENTS.md](AGENTS.md)를 따른다.
 

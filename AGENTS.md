@@ -10,5 +10,7 @@
 - 스키마 변경은 새 Flyway migration으로만 수행한다. 적용된 파일 수정, ddl-auto update/create, 운영 clean/repair를 금지한다.
 - 기본 시간대는 UTC, open-in-view는 false, ddl-auto는 validate다.
 - 비밀번호·토큰·실제 .env·백업을 커밋하거나 로그에 출력하지 않는다. 운영 비밀은 secret manager에서 파일로 주입한다.
+- 저장소가 private여도 공개 저장소와 동일한 비밀 관리 규칙을 적용한다. 실제 비밀값은 Git에서 제외한 .env/외부 secret 파일에만 저장하고 .env.example에는 예시만 둔다.
+- 매 커밋 전 scripts/check-secrets.sh로 금지 파일·staged 변경·전체 Git 이력을 검사한다. 검사 우회나 광범위 allowlist를 추가하지 않는다. 공개 전 전체 이력 검사와 운영 접속 정보 검토를 다시 수행한다.
 - 배포와 복구는 docs/operations.md를 따른다. 운영 배포와 파괴적 DB 작업에는 명시적인 실행 승인이 필요하다.
 - 검증을 실행하지 못했거나 원격 설정이 적용되지 않았으면 완료로 보고하지 않는다.

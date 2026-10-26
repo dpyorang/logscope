@@ -40,3 +40,14 @@ backups/
 *.pem
 *.key
 .DS_Store
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.sql.gz
+*.dump
+.aws/
+.ssh/
+.npmrc
+.netrc
+gitleaks-report.*
