@@ -1,0 +1,6 @@
+spring:
+  config:
+    import: configtree:/run/secrets/
+  datasource:
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:10}

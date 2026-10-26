@@ -1,0 +1,6 @@
+spring:
+  datasource:
+    # ConnectionDetails from Testcontainers overrides these test-only placeholders.
+    url: jdbc:mysql://localhost:3306/unused
+    username: unused
+    password: unused

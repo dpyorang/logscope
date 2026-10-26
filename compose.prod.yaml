@@ -1,0 +1,26 @@
+# Standalone production definition; do not merge with compose.yaml.
+services:
+  app:
+    image: ${APP_IMAGE:?Set an immutable registry image digest}
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_URL: ${DB_URL:?Set TLS-enabled external MySQL URL}
+    secrets:
+      - source: db_username
+        target: DB_USERNAME
+      - source: db_password
+        target: DB_PASSWORD
+    ports:
+      - "127.0.0.1:8080:8080"
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 40s
+    restart: unless-stopped
+secrets:
+  db_username:
+    file: ${DB_USERNAME_FILE:?Set secret file path}
+  db_password:
+    file: ${DB_PASSWORD_FILE:?Set secret file path}
