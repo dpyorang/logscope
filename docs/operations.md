@@ -19,6 +19,12 @@ GitHub 플랜/공개 여부에 따른 보호 지원 여부도 실제 적용 결�
 
 ## 환경과 비밀
 
+저장소는 현재 private이며 향후 public 전환을 전제로 관리한다. 실제 `.env`는
+Git에 넣지 않고 `.env.example`에는 예시만 기록한다. private 전환은 이미 노출된
+비밀을 회수하지 않으므로 비밀이 발견되면 먼저 폐기·재발급한다. 공개 전
+`./scripts/check-secrets.sh`로 전체 이력을 검사하고 내부 주소·개인정보도 검토한다.
+자동 탐지는 모든 종류의 민감정보를 보장하지 않으므로 변경 내용 검토를 병행한다.
+
 local은 compose.yaml과 gitignore 처리된 .env를 사용한다. 운영은 별도 관리형
 MySQL 8.4 LTS와 compose.prod.yaml을 사용한다. staging도 운영과 분리된 DB와
 secret 파일을 사용하여 prod 프로필로 동일한 배포를 검증한다.

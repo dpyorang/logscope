@@ -15,9 +15,12 @@ Spotless와 커밋 훅, CI, 환경/비밀 설정, 배포·복구 절차.
 - Git 2.39.5 설치 확인. 로컬 setup/bootstrap 브랜치로 초기화하고 origin 및 커밋 검증 훅 연결 완료
 - 첫 커밋 40e4109: 기본 실행 환경. 커밋 훅의 전체 검증 통과
 - 로컬 Compose 기동 성공. readiness HTTP 200 및 `{"status":"UP"}` 확인
-- 대상 GitHub: https://github.com/dpyorang/logscope (사용자 지정). GitHub 연동과 admin/push 권한 확인 완료. 공개 저장소이며 아직 원격 브랜치가 없음
-- 공개 저장소로의 최초 push는 자동 승인 검토에서 구체적 게시 승인 필요로 거절됨. 사용자 승인 전 업로드하지 않음
-- 원격 CI 실행·main 브랜치 보호 적용은 최초 업로드 대기 중. GitHub 연결 도구에는 브랜치 보호 변경 기능이 없어 적용 시 CLI 관리자 인증 또는 웹 설정 접근 필요
+- 대상 GitHub: https://github.com/dpyorang/logscope (사용자 지정). 사용자 직접 private 전환 후 API의 private=true 확인 완료. GitHub 연동과 admin/push 권한 확인, 원격 브랜치는 아직 없음
+- 두 번째 커밋 8d280aa: CI와 운영 규칙. 세 번째 커밋 4f077eb: 비밀정보 차단. 각 커밋의 전체 검증 통과
+- 실제 .env의 비밀값 2개는 기존 전체 이력에 없음을 확인. Gitleaks 이력·staged 검사에서 발견 0건
+- 실제 .env는 gitignore와 dockerignore로 제외, 예제 파일에는 예시만 유지. private 상태여도 공개 저장소 기준으로 관리
+- 최초 비공개 push는 로컬 Git 인증이 없어 실패. GitHub CLI 공식 웹 로그인 승인 대기 중
+- 원격 CI 실행·main 브랜치 보호 적용은 최초 업로드 대기 중
 - 운영 배포 대상/registry/DB/secret manager가 미지정. 실제 배포·복구 리허설 없음
 
 예정 커밋 단위(각 커밋 직전 전체 검증 필수):
