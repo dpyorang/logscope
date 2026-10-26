@@ -9,6 +9,7 @@
 - `git config core.hooksPath .githooks`를 설정한다. `--no-verify`, 테스트 스킵, Docker 미사용 시 테스트 자동 생략을 금지한다.
 - 포맷 수정: `./mvnw spotless:apply`. 변경 후 전체 검증을 다시 실행한다.
 - main 직접 푸시와 강제 푸시를 금지하고 PR과 CI `verify`를 통해 병합한다. 빈 원격 저장소에 최초 기준 커밋을 만드는 경우만 검증 통과 후 main을 생성할 수 있다.
+- GitHub Actions는 지원 중인 공식 릴리스의 전체 커밋 SHA로 고정하고, 실행 OS는 명시적 버전으로 지정한다. 갱신 시 공식 릴리스와 CI 결과를 확인한다.
 - 스키마 변경은 새 Flyway migration으로만 수행한다. 적용된 파일 수정, ddl-auto update/create, 운영 clean/repair를 금지한다.
 - 기본 시간대는 UTC, open-in-view는 false, ddl-auto는 validate다.
 - 비밀번호·토큰·실제 .env·백업을 커밋하거나 로그에 출력하지 않는다. 운영 비밀은 secret manager에서 파일로 주입한다.
