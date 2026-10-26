@@ -19,7 +19,11 @@ services:
     restart: unless-stopped
   app:
     build: .
-    env_file: ${APP_ENV_FILE:-.env}
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-local}
+      DB_URL: ${DB_URL:?Set DB_URL}
+      DB_USERNAME: ${DB_USERNAME:?Set DB_USERNAME}
+      DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
