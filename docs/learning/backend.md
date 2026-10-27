@@ -10,6 +10,7 @@
 | [기능별 학습 기록 누적 방식](#learning-record-format) | 2026-10-27 15:32 KST | 사용자 요청에 따른 누적 기록 구조 변경. 기능 구현 없음. |
 | [영역별 공통 누적 형식 적용](#backend-common-format-20261027) | 2026-10-27 15:36 KST | 목차를 주제·시간·요약으로 통일하고 기존 내용을 보존. 문서 형식 변경만 수행. |
 | [합성 로그 수집·저장·최소 조회 구현](#backend-ingest-read-20261027) | 2026-10-27 15:48 KST | 첫 기능 구현·실제 HTTP/MySQL 테스트 통과. 전체 검증·커밋·PR은 아래 상태 참고. |
+| [전체 검증 통과와 첫 기능 PR 생성](#backend-ingest-pr-20261027) | 2026-10-27 15:53 KST | 전체 검증 훅 통과·기능 커밋 및 PR #8 생성. 기록 시점 CI는 실행 중. |
 <a id="backend-foundation"></a>
 
 ## 주제: 백엔드 설계 배경과 핵심 개념 / 시간: 2026-10-27 (작성 시각 미기록)
@@ -316,3 +317,35 @@ DATETIME(3)·UTC LocalDateTime 변환으로 JVM 기본 시간대에 의존하지
 - [API 명세와 현재 구현 범위](../contracts/log-api-draft.md), [기능별 진행](../feature-development-workflow.md).
 - [컨트롤러](../../src/main/java/com/logscope/log/LogController.java), [저장소](../../src/main/java/com/logscope/log/LogStore.java), [V2 migration](../../src/main/resources/db/migration/V2__create_log_events.sql).
 - [HTTP·MySQL 테스트](../../src/test/java/com/logscope/LogApiTests.java). PR·CI 링크는 생성·확인 후 별도 후속 기록으로 남긴다.
+
+<a id="backend-ingest-pr-20261027"></a>
+
+## 주제: 전체 검증 통과와 첫 기능 PR 생성 / 시간: 2026-10-27 15:53 KST
+
+### 1. 사용자 요청과 목표
+
+[첫 구현 기록](#backend-ingest-read-20261027)의 후속이다. 사용자가 요청한 전체 검증·커밋·PR까지 진행하고 실제 결과를 설계 결정과 구분해 남긴다.
+
+### 2. 추가·변경한 내용
+
+최신 main 0c07601 위에서 기능 커밋 a256fbe를 만들고 작업 브랜치만 푸시해 PR #8을 생성했다. main 직접 푸시·강제 푸시·병합은 하지 않았다. 이 후속 기록은 문서만 추가하며 기능 동작을 바꾸지 않는다. 총괄에서 main에 병합한 학습 기록·공통 규칙이 그대로 유지되도록 반영했다.
+
+### 3. 선택 이유와 대안
+
+작업 중 main에 새 문서가 병합되어 구현 변경을 임시 보존하고 최신 기준을 반영했다. 기존 학습 문서를 덮어쓰지 않고 구현 기록만 추가했다. DB PK·트랜잭션·엄격한 입력 검증과 미구현 조건의 명시적 응답이라는 선택은 첫 기록과 API 명세에 남겼다.
+
+### 4. 검증 결과와 한계
+
+15:49 KST 최초 verify 성공 후, 최신 main 반영·staged 변경 검토를 거쳐 15:50~15:51 KST 커밋 훅에서 verify.sh를 다시 통과했다. staged·전체 Git 이력 비밀 검사, Gradle clean build, 실제 MySQL Testcontainers/HTTP 테스트 13개(실패·오류·생략 0), Spotless, Compose config, Docker 이미지 빌드를 통과해 커밋이 생성됐다. 작성자·커미터는 GitHub noreply 이메일인지 확인했다. 학습 문서의 로컬 링크도 확인했다.
+
+PR 생성 뒤 CI verify를 실행 중이며 이 기록 시점에는 아직 성공으로 보고하지 않는다. 이 기록을 커밋할 때도 같은 전체 검증 훅을 실행한다. 정확한 최종 PR head와 CI 결과는 PR의 Checks에서 확인한다. 이전 결과를 후속 revision의 결과로 간주하지 않는다. 실제 운영·성능·샘플 WAS·화면 검증이나 PR 병합은 하지 않았다.
+
+### 5. 배운 개념과 남은 일
+
+로컬 테스트 성공, 전체 검증 성공, 커밋 생성, 원격 CI 성공, PR 병합은 각각 별도 결과다. 로컬 검증을 통과해도 CI 결과를 실제로 확인해야 하며, 최신 main 반영으로 문서나 코드가 바뀌면 필요한 검증을 다시 해야 한다. 다음 기능으로 넘어가기 전 PR 검토·CI·병합과 보존 확인을 진행해야 한다.
+
+### 6. 관련 문서와 결과 링크
+
+- [기능 구현 커밋](https://github.com/dpyorang/logscope/commit/a256fbe), [PR #8](https://github.com/dpyorang/logscope/pull/8).
+- [최초 PR CI 실행](https://github.com/dpyorang/logscope/actions/runs/40463634147): 기록 당시 실행 중. 후속 head의 상태는 PR Checks를 따른다.
+- [API 명세](../contracts/log-api-draft.md), [첫 구현·테스트 기록](#backend-ingest-read-20261027), [전체 검증 스크립트](../../scripts/verify.sh).
