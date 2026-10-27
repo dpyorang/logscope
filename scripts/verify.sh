@@ -7,3 +7,4 @@ docker compose --env-file .env.example config --quiet
 docker build --tag logscope:verify .
 docker build --tag logscope-frontend:verify ./frontend
 ./scripts/check-frontend-image.sh
+node scripts/verify-log-view.mjs
