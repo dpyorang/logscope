@@ -255,3 +255,50 @@ test("밝은 화면에서 긴 원문·좁은 화면·확대와 선택 표시를 
     page.getByRole("button", { name: /was-2.*상세 보기/ }),
   ).toBeFocused();
 });
+
+test("공통 화면 틀은 로그 탐색만 제공하고 메뉴 이동으로 조회·상세를 초기화하지 않는다", async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/");
+  const nav = page.getByRole("navigation", { name: "주 메뉴" });
+  await expect(nav.getByRole("link")).toHaveCount(1);
+  const link = nav.getByRole("link", { name: "로그 탐색" });
+  await expect(link).toHaveAttribute("aria-current", "page");
+  await page.getByRole("button", { name: /was-2.*상세 보기/ }).click();
+  const range = await page.locator(".query-info").textContent();
+  await link.click();
+  await expect(page.getByRole("main")).toBeFocused();
+  await expect(page.getByLabel("Stack trace 원문")).toContainText(
+    "DemoService",
+  );
+  expect(await page.locator(".query-info").textContent()).toBe(range);
+  await page.mouse.click(1350, 980);
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const main = await page.getByRole("main").boundingBox();
+  const menu = await nav.boundingBox();
+  expect(main!.x).toBeGreaterThan(menu!.x + menu!.width - 1);
+  await page.screenshot({
+    path: testInfo.outputPath("workspace-desktop.png"),
+    fullPage: true,
+  });
+  await page.setViewportSize({ width: 360, height: 900 });
+  const mobileMain = await page.getByRole("main").boundingBox();
+  const mobileMenu = await nav.boundingBox();
+  expect(mobileMain!.y).toBeGreaterThanOrEqual(
+    mobileMenu!.y + mobileMenu!.height,
+  );
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: testInfo.outputPath("workspace-mobile.png"),
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: /was-2.*상세 보기/ }),
+  ).toBeFocused();
+});
