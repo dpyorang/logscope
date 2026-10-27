@@ -11,6 +11,8 @@
 | [영역별 공통 누적 형식 적용](#backend-common-format-20261027) | 2026-10-27 15:36 KST | 목차를 주제·시간·요약으로 통일하고 기존 내용을 보존. 문서 형식 변경만 수행. |
 | [합성 로그 수집·저장·최소 조회 구현](#backend-ingest-read-20261027) | 2026-10-27 15:48 KST | 첫 기능 구현·실제 HTTP/MySQL 테스트 통과. 전체 검증·커밋·PR은 아래 상태 참고. |
 | [전체 검증 통과와 첫 기능 PR 생성](#backend-ingest-pr-20261027) | 2026-10-27 15:53 KST | 전체 검증 훅 통과·기능 커밋 및 PR #8 생성. 기록 시점 CI는 실행 중. |
+| [로그 입력 단위 테스트로 오류 원인 분리](#backend-loginput-unit-20261027) | 2026-10-27 16:02 KST | 입력 규칙·경계·오류 코드를 독립적으로 확인하는 테스트 추가. 통합 테스트 유지. |
+
 <a id="backend-foundation"></a>
 
 ## 주제: 백엔드 설계 배경과 핵심 개념 / 시간: 2026-10-27 (작성 시각 미기록)
@@ -349,3 +351,48 @@ PR 생성 뒤 CI verify를 실행 중이며 이 기록 시점에는 아직 성�
 - [기능 구현 커밋](https://github.com/dpyorang/logscope/commit/a256fbe), [PR #8](https://github.com/dpyorang/logscope/pull/8).
 - [최초 PR CI 실행](https://github.com/dpyorang/logscope/actions/runs/40463634147): 기록 당시 실행 중. 후속 head의 상태는 PR Checks를 따른다.
 - [API 명세](../contracts/log-api-draft.md), [첫 구현·테스트 기록](#backend-ingest-read-20261027), [전체 검증 스크립트](../../scripts/verify.sh).
+
+<a id="backend-loginput-unit-20261027"></a>
+
+## 주제: 로그 입력 단위 테스트로 오류 원인 분리 / 시간: 2026-10-27 16:02 KST
+
+### 1. 사용자 요청과 목표
+
+사용자는 문자열 A의 검증 오류를 HTTP·DB 통신 오류와 구분하려면 단위 테스트가 필요하다고 설명했다. 기존 통합 테스트를 유지하면서 LogInput 단위 테스트를 추가하고 앞으로 모든 백엔드 기능에 단위 테스트를 함께 작성하도록 요청했다. 이 기록은 해당 테스트 변경의 전체 검증과 작업 커밋 이후 작성했다.
+
+### 2. 추가·변경한 내용
+
+LogInputTests는 Spring 컨텍스트·HTTP 서버·MySQL·Docker 없이 LogInput을 직접 호출한다. JUnit Jupiter의 일반·매개변수 테스트와 AssertJ를 사용한다. 기존 통합 테스트 파일과 운영 코드는 변경하지 않았다. 향후 기능에 단위 테스트를 함께 작성하고 통합 테스트를 대체·생략하지 않는 기준을 루트 작업 규칙에 추가했다.
+
+입력값의 누락·null·공백·잘못된 JSON 자료형, 알 수 없는 필드, UUID v4의 대소문자·버전·variant, 로그 레벨, 서비스·서버 이름 패턴, 메시지·예외 길이를 확인한다. Unicode는 ASCII·한글·이모지의 최대 길이와 한 글자 초과, 짝이 없는 surrogate를 구분한다. 시간은 소수 초 정밀도·윤년·날짜 범위·잘못된 UTC 표현을 확인한다. 반환값뿐 아니라 오류의 HTTP 상태·상위 코드·필드명·필드 오류 코드도 검사한다.
+
+### 3. 선택 이유와 대안
+
+통합 테스트만 실패하면 입력 검증·요청 파싱·응답 변환·DB 중 어느 부분인지 더 살펴봐야 한다. 입력 규칙을 직접 테스트하면 같은 A를 넣어 해당 단계가 예상대로 동작하는지 빠르게 좁힐 수 있다. 예를 들어 level=A는 level 필드의 INVALID_ENUM이어야 하고, 잘못된 조회 종료 시각은 to 필드의 INVALID_UTC_TIMESTAMP여야 한다.
+
+데이터를 담은 실제 JSON 노드를 사용하되 네트워크·DB는 연결하지 않는다. 순수 검증 로직에 불필요한 Spring 초기화나 mock을 도입하지 않았다. 여러 입력에서 같은 규칙을 확인할 때 매개변수 테스트를 사용해 실패한 입력 사례를 구분한다. 단순히 내부 메서드가 호출됐다는 사실보다 반환 데이터와 오류라는 관찰 가능한 동작을 검사한다.
+
+### 4. 동작 확인과 한계
+
+40개의 단위 테스트 사례에서 정상 원문·공백·줄바꿈 보존, exception 생략/null의 동등성, 필드별 검증 오류와 Unicode·시각 경계를 확인했다. 예외 없이 처리되는 것만 확인하는 대신 정상 기본 사례는 기대 LogEvent 전체를 비교한다.
+
+단위 테스트는 HTTP 본문의 UTF-8·JSON 파싱, 실제 byte 제한, SQL·트랜잭션·동시성·DB 원문 저장을 보장하지 않는다. 이를 위해 기존 HTTP·실제 MySQL 통합 테스트 13개를 함께 유지한다. 단위 테스트가 통과해도 실제 장애 입력과 동일한 조건을 다뤘는지 확인해야 하며 앱 로직에 문제가 없다고 단정할 수 없다.
+
+### 5. 배운 개념과 남은 일
+
+단위/통합은 JUnit이라는 도구의 차이가 아니라 검사하는 범위의 차이다. 이번 단위 테스트는 입력 규칙을 격리하고, 통합 테스트는 구성 요소 사이의 연결을 검사한다. 두 종류의 결과를 함께 보면 오류 원인을 더 좁힐 수 있다.
+
+특정 문자열 오류를 재현할 때 그 사례를 테스트 입력으로 추가하고 기대 반환값 또는 필드 오류를 명시한다. 다음과 같이 단위 테스트 클래스만 실행하거나 --tests에 메서드 이름을 붙여 진단할 수 있다. 이 명령은 빠른 진단용이며 커밋 전 전체 verify.sh를 대체하지 않는다.
+
+```sh
+./gradlew test --tests com.logscope.log.LogInputTests
+./gradlew test --tests 'com.logscope.log.LogInputTests.rejectsUnknownOrNonCanonicalLevels'
+```
+
+앞으로 새로운 기능에도 정상·실패·경계에 맞는 단위 테스트를 함께 작성하고, DB·HTTP 연결에 의존하는 성질은 통합 테스트로 확인한다. 아직 구현하지 않은 필터·커서·자동 전송에 대한 테스트까지 이번에 만들지는 않았다.
+
+### 6. 관련 문서와 코드
+
+- [LogInput 단위 테스트](../../src/test/java/com/logscope/log/LogInputTests.java), [입력 검증](../../src/main/java/com/logscope/log/LogInput.java), [오류 정의](../../src/main/java/com/logscope/log/LogApiException.java).
+- [기존 HTTP·MySQL 테스트](../../src/test/java/com/logscope/LogApiTests.java), [API 명세](../contracts/log-api-draft.md), [작업 규칙](../../AGENTS.md).
+- [이전 저장·조회 학습](#backend-ingest-read-20261027). 기존 설계 설명은 당시 기록이며 이 항목의 테스트 구현과 구분한다.
