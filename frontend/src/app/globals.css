@@ -510,3 +510,112 @@ button {
     flex-wrap: wrap;
   }
 }
+
+/* 공통 화면 틀: 조회·상세 상태는 기존 탐색 컴포넌트가 유지한다. */
+.workspace-shell {
+  max-width: none;
+  padding: 0;
+  min-height: 100vh;
+}
+.workspace-shell .site-header {
+  background: #fff;
+  padding: 20px 28px;
+}
+.workspace-body {
+  display: grid;
+  grid-template-columns: 164px minmax(0, 1fr);
+  min-height: calc(100vh - 78px);
+}
+.workspace-nav {
+  background: #fff;
+  border-right: 1px solid var(--line);
+  padding: 24px 12px;
+}
+.workspace-nav a {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 12px 10px;
+  color: #26477f;
+  background: #eaf0fc;
+  border: 1px solid #71839e;
+  border-radius: 7px;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 600;
+}
+.workspace-nav svg {
+  flex-shrink: 0;
+}
+.workspace-content {
+  min-width: 0;
+  padding: 0 26px;
+}
+.workspace-shell .explorer-main {
+  padding-top: 26px;
+}
+.workspace-shell .page-title h1 {
+  font-size: 24px;
+  letter-spacing: -0.5px;
+}
+.workspace-shell .page-title .eyebrow {
+  display: none;
+}
+.workspace-shell .page-title .intro {
+  font-size: 14px;
+  margin-bottom: 20px;
+}
+.workspace-shell .query-info {
+  padding: 16px 20px;
+}
+.workspace-shell .list-panel,
+.workspace-shell .detail-panel {
+  padding: 18px;
+  box-shadow: none;
+}
+.workspace-shell .primary-button {
+  background: #fff;
+  color: #26477f;
+  border-color: #71839e;
+}
+.workspace-shell .primary-button:hover {
+  background: #eaf0fc;
+}
+.workspace-shell .message-full,
+.workspace-shell .trace {
+  color: var(--ink);
+}
+@media (max-width: 600px) {
+  .workspace-shell .site-header {
+    padding: 16px;
+  }
+  .workspace-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .workspace-nav {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    padding: 10px 16px;
+  }
+  .workspace-nav a {
+    width: fit-content;
+    padding: 8px 12px;
+  }
+  .workspace-content {
+    padding: 0 14px;
+  }
+  .workspace-shell .explorer-main {
+    padding-top: 20px;
+  }
+  .workspace-shell .list-panel,
+  .workspace-shell .detail-panel {
+    padding: 14px;
+  }
+  .workspace-shell .query-info {
+    padding: 14px;
+  }
+}
+
+.workspace-shell td:last-child button {
+  white-space: nowrap;
+}

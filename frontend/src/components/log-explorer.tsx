@@ -181,7 +181,7 @@ export function LogExplorer({
   }
   const current = selection?.result?.ok ? selection.result.data : null;
   return (
-    <div className="shell explorer-shell">
+    <div className="shell explorer-shell workspace-shell">
       <header className="site-header">
         <div className="header-context">
           <Link className="brand" href="/" aria-label="logscope 홈">
@@ -194,253 +194,279 @@ export function LogExplorer({
         </div>
         <span className="environment-label">개발 환경</span>
       </header>
-      <main id="main-content" className="explorer-main" tabIndex={-1}>
-        <div className="page-title">
-          <div>
-            <p className="eyebrow">서버 로그 관측</p>
-            <h1>로그 탐색</h1>
-            <p className="intro">
-              발생한 서버를 확인하고 로그의 상세 내용을 살펴보세요.
-            </p>
-          </div>
-          <button
-            className="primary-button"
-            disabled={busy}
-            onClick={() => queryList(recentRange())}
-          >
-            {busy ? "조회 중…" : "새로고침"}
-          </button>
-        </div>
-        <div className="query-info">
-          <div>
-            <strong>최근 24시간 · 최신순 · 최대 50건</strong>
-            <p>
-              조회 범위: <time>{displayTime(range.from)}</time> ~{" "}
-              <time>{displayTime(range.to)}</time>
-            </p>
-            <p>시작 시각 포함 · 종료 시각 제외</p>
-          </div>
-          <p>
-            {successAt ? (
-              <>
-                마지막 성공 조회
-                <br />
-                <time>{displayTime(successAt)}</time>
-              </>
-            ) : (
-              "아직 성공한 조회가 없습니다"
-            )}
-          </p>
-        </div>
-        <p className="query-status" role="status" aria-live="polite">
-          {busy
-            ? "목록을 갱신하고 있습니다. 기존 결과는 이전 조회 결과입니다."
-            : result.ok
-              ? `현재 목록 ${result.data.items.length}건`
-              : "목록 조회 실패"}
-        </p>
-        {listError && (
-          <div className="error-notice" role="alert">
-            <strong>{guidance(listError.code)}</strong>
-            {result.ok && <p>이전 조회 결과를 표시하고 있습니다.</p>}
-            <p>
-              실패한 조회 범위: {displayTime(listError.range.from)} ~{" "}
-              {displayTime(listError.range.to)}
-            </p>
-            {listError.retryAfter && (
-              <p>
-                서버가 재시도 대기를 요청했습니다. 잠시 후 다시 시도해 주세요.
-              </p>
-            )}
-            <button disabled={busy} onClick={() => queryList(listError.range)}>
-              같은 범위로 다시 시도
-            </button>
-          </div>
-        )}
-        <div className="explorer-grid">
-          <section
-            className="list-panel"
-            aria-labelledby="list-heading"
-            aria-busy={busy}
-          >
-            <h2 id="list-heading" ref={listHeading} tabIndex={-1}>
-              로그 목록
-            </h2>
-            {result.ok && result.data.items.length === 0 && (
-              <div className="empty-state">
-                <h3>조회 범위에 로그가 없습니다</h3>
-                <p>
-                  최근 24시간에 발생한 로그만 표시합니다. 로그를 새로 전송한 뒤
-                  새로고침해 주세요.
+      <div className="workspace-body">
+        <nav className="workspace-nav" aria-label="주 메뉴">
+          <a href="#main-content" aria-current="page">
+            <svg
+              viewBox="0 0 20 20"
+              width="18"
+              height="18"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+              aria-hidden="true"
+            >
+              <path d="M7 5h10M7 10h10M7 15h10M2 5h1M2 10h1M2 15h1" />
+            </svg>
+            로그 탐색
+          </a>
+        </nav>
+        <div className="workspace-content">
+          <main id="main-content" className="explorer-main" tabIndex={-1}>
+            <div className="page-title">
+              <div>
+                <p className="eyebrow">서버 로그 관측</p>
+                <h1>로그 탐색</h1>
+                <p className="intro">
+                  발생한 서버를 확인하고 로그의 상세 내용을 살펴보세요.
                 </p>
               </div>
-            )}
-            {result.ok && result.data.items.length > 0 && (
-              <div
-                className="table-scroll"
-                tabIndex={0}
-                role="region"
-                aria-label="로그 목록 표 가로 스크롤"
+              <button
+                className="primary-button"
+                disabled={busy}
+                onClick={() => queryList(recentRange())}
               >
-                <table>
-                  <caption className="sr-only">
-                    발생 시각 최신순의 로그 목록
-                  </caption>
-                  <thead>
-                    <tr>
-                      <th scope="col">발생 시각 (UTC)</th>
-                      <th scope="col">레벨</th>
-                      <th scope="col">서버</th>
-                      <th scope="col">메시지</th>
-                      <th scope="col">상세</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {result.data.items.map((item) => (
-                      <tr
-                        key={item.eventId}
-                        className={
-                          selection?.id === item.eventId ? "selected" : ""
-                        }
-                      >
-                        <td className="timestamp">
-                          {displayTime(item.occurredAt)}
-                        </td>
-                        <td>
-                          <span
-                            className={
-                              item.level === "ERROR"
-                                ? "level error-level"
-                                : "level"
-                            }
-                          >
-                            {item.level}
-                          </span>
-                        </td>
-                        <td>{item.instanceId}</td>
-                        <td>
-                          <span className="message-summary">
-                            {item.message}
-                          </span>
-                          {item.hasException && (
-                            <span className="exception-label">예외 있음</span>
-                          )}
-                        </td>
-                        <td>
-                          <button
-                            aria-label={`${item.instanceId} ${item.occurredAt} 로그 상세 보기`}
-                            aria-pressed={selection?.id === item.eventId}
-                            aria-disabled={busy}
-                            onClick={(event) => {
-                              if (!busy)
-                                void queryDetail(
-                                  item.eventId,
-                                  event.currentTarget,
-                                );
-                            }}
-                          >
-                            상세 보기
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            {!result.ok && (
-              <p className="empty-state">
-                조회에 성공하면 로그가 여기에 표시됩니다.
-              </p>
-            )}
-          </section>
-          <section
-            className="detail-panel"
-            ref={panel}
-            aria-labelledby="detail-heading"
-          >
-            <div className="panel-title">
-              <h2 id="detail-heading" ref={detailHeading} tabIndex={-1}>
-                로그 상세
-              </h2>
-              {selection && <button onClick={closeDetail}>닫기</button>}
+                {busy ? "조회 중…" : "새로고침"}
+              </button>
             </div>
-            {!selection && (
-              <p className="empty-state">
-                로그를 선택하면 상세 내용을 확인할 수 있습니다.
+            <div className="query-info">
+              <div>
+                <strong>최근 24시간 · 최신순 · 최대 50건</strong>
+                <p>
+                  조회 범위: <time>{displayTime(range.from)}</time> ~{" "}
+                  <time>{displayTime(range.to)}</time>
+                </p>
+                <p>시작 시각 포함 · 종료 시각 제외</p>
+              </div>
+              <p>
+                {successAt ? (
+                  <>
+                    마지막 성공 조회
+                    <br />
+                    <time>{displayTime(successAt)}</time>
+                  </>
+                ) : (
+                  "아직 성공한 조회가 없습니다"
+                )}
               </p>
-            )}
-            {selection && !selection.result && (
-              <p role="status">상세 로그를 불러오고 있습니다.</p>
-            )}
-            {selection?.result && !selection.result.ok && (
-              <div role="alert">
-                <p>{guidance(selection.result.problem.code)}</p>
+            </div>
+            <p className="query-status" role="status" aria-live="polite">
+              {busy
+                ? "목록을 갱신하고 있습니다. 기존 결과는 이전 조회 결과입니다."
+                : result.ok
+                  ? `현재 목록 ${result.data.items.length}건`
+                  : "목록 조회 실패"}
+            </p>
+            {listError && (
+              <div className="error-notice" role="alert">
+                <strong>{guidance(listError.code)}</strong>
+                {result.ok && <p>이전 조회 결과를 표시하고 있습니다.</p>}
+                <p>
+                  실패한 조회 범위: {displayTime(listError.range.from)} ~{" "}
+                  {displayTime(listError.range.to)}
+                </p>
+                {listError.retryAfter && (
+                  <p>
+                    서버가 재시도 대기를 요청했습니다. 잠시 후 다시 시도해
+                    주세요.
+                  </p>
+                )}
                 <button
                   disabled={busy}
-                  onClick={() => queryDetail(selection.id)}
+                  onClick={() => queryList(listError.range)}
                 >
-                  상세 다시 시도
+                  같은 범위로 다시 시도
                 </button>
               </div>
             )}
-            {current && (
-              <>
-                <dl className="metadata">
-                  <dt>발생 시각</dt>
-                  <dd>{displayTime(current.occurredAt)}</dd>
-                  <dt>서비스</dt>
-                  <dd>{current.serviceName}</dd>
-                  <dt>서버</dt>
-                  <dd>{current.instanceId}</dd>
-                  <dt>레벨</dt>
-                  <dd>{current.level}</dd>
-                  <dt>이벤트 ID</dt>
-                  <dd>{current.eventId}</dd>
-                </dl>
-                <h3>메시지 원문</h3>
-                <pre className="message-full">{current.message}</pre>
-                <div className="trace-title">
-                  <h3>Stack trace</h3>
-                  {current.exception !== null && (
-                    <div>
-                      <button
-                        aria-pressed={wrap}
-                        onClick={() => setWrap(!wrap)}
-                      >
-                        줄바꿈 {wrap ? "켜짐" : "꺼짐"}
-                      </button>
-                      <button onClick={() => copyTrace(current.exception!)}>
-                        원문 복사
-                      </button>
-                    </div>
-                  )}
-                </div>
-                {current.exception === null ? (
-                  <p>이 로그에는 stack trace가 없습니다.</p>
-                ) : (
-                  <pre
-                    className={wrap ? "trace wrapped" : "trace"}
-                    tabIndex={0}
-                    aria-label="Stack trace 원문"
-                  >
-                    {current.exception}
-                  </pre>
+            <div className="explorer-grid">
+              <section
+                className="list-panel"
+                aria-labelledby="list-heading"
+                aria-busy={busy}
+              >
+                <h2 id="list-heading" ref={listHeading} tabIndex={-1}>
+                  로그 목록
+                </h2>
+                {result.ok && result.data.items.length === 0 && (
+                  <div className="empty-state">
+                    <h3>조회 범위에 로그가 없습니다</h3>
+                    <p>
+                      최근 24시간에 발생한 로그만 표시합니다. 로그를 새로 전송한
+                      뒤 새로고침해 주세요.
+                    </p>
+                  </div>
                 )}
-                <p role="status" className="copy-status">
-                  {copyState}
-                </p>
-              </>
-            )}
-          </section>
+                {result.ok && result.data.items.length > 0 && (
+                  <div
+                    className="table-scroll"
+                    tabIndex={0}
+                    role="region"
+                    aria-label="로그 목록 표 가로 스크롤"
+                  >
+                    <table>
+                      <caption className="sr-only">
+                        발생 시각 최신순의 로그 목록
+                      </caption>
+                      <thead>
+                        <tr>
+                          <th scope="col">발생 시각 (UTC)</th>
+                          <th scope="col">레벨</th>
+                          <th scope="col">서버</th>
+                          <th scope="col">메시지</th>
+                          <th scope="col">상세</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {result.data.items.map((item) => (
+                          <tr
+                            key={item.eventId}
+                            className={
+                              selection?.id === item.eventId ? "selected" : ""
+                            }
+                          >
+                            <td className="timestamp">
+                              {displayTime(item.occurredAt)}
+                            </td>
+                            <td>
+                              <span
+                                className={
+                                  item.level === "ERROR"
+                                    ? "level error-level"
+                                    : "level"
+                                }
+                              >
+                                {item.level}
+                              </span>
+                            </td>
+                            <td>{item.instanceId}</td>
+                            <td>
+                              <span className="message-summary">
+                                {item.message}
+                              </span>
+                              {item.hasException && (
+                                <span className="exception-label">
+                                  예외 있음
+                                </span>
+                              )}
+                            </td>
+                            <td>
+                              <button
+                                aria-label={`${item.instanceId} ${item.occurredAt} 로그 상세 보기`}
+                                aria-pressed={selection?.id === item.eventId}
+                                aria-disabled={busy}
+                                onClick={(event) => {
+                                  if (!busy)
+                                    void queryDetail(
+                                      item.eventId,
+                                      event.currentTarget,
+                                    );
+                                }}
+                              >
+                                상세 보기
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+                {!result.ok && (
+                  <p className="empty-state">
+                    조회에 성공하면 로그가 여기에 표시됩니다.
+                  </p>
+                )}
+              </section>
+              <section
+                className="detail-panel"
+                ref={panel}
+                aria-labelledby="detail-heading"
+              >
+                <div className="panel-title">
+                  <h2 id="detail-heading" ref={detailHeading} tabIndex={-1}>
+                    로그 상세
+                  </h2>
+                  {selection && <button onClick={closeDetail}>닫기</button>}
+                </div>
+                {!selection && (
+                  <p className="empty-state">
+                    로그를 선택하면 상세 내용을 확인할 수 있습니다.
+                  </p>
+                )}
+                {selection && !selection.result && (
+                  <p role="status">상세 로그를 불러오고 있습니다.</p>
+                )}
+                {selection?.result && !selection.result.ok && (
+                  <div role="alert">
+                    <p>{guidance(selection.result.problem.code)}</p>
+                    <button
+                      disabled={busy}
+                      onClick={() => queryDetail(selection.id)}
+                    >
+                      상세 다시 시도
+                    </button>
+                  </div>
+                )}
+                {current && (
+                  <>
+                    <dl className="metadata">
+                      <dt>발생 시각</dt>
+                      <dd>{displayTime(current.occurredAt)}</dd>
+                      <dt>서비스</dt>
+                      <dd>{current.serviceName}</dd>
+                      <dt>서버</dt>
+                      <dd>{current.instanceId}</dd>
+                      <dt>레벨</dt>
+                      <dd>{current.level}</dd>
+                      <dt>이벤트 ID</dt>
+                      <dd>{current.eventId}</dd>
+                    </dl>
+                    <h3>메시지 원문</h3>
+                    <pre className="message-full">{current.message}</pre>
+                    <div className="trace-title">
+                      <h3>Stack trace</h3>
+                      {current.exception !== null && (
+                        <div>
+                          <button
+                            aria-pressed={wrap}
+                            onClick={() => setWrap(!wrap)}
+                          >
+                            줄바꿈 {wrap ? "켜짐" : "꺼짐"}
+                          </button>
+                          <button onClick={() => copyTrace(current.exception!)}>
+                            원문 복사
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                    {current.exception === null ? (
+                      <p>이 로그에는 stack trace가 없습니다.</p>
+                    ) : (
+                      <pre
+                        className={wrap ? "trace wrapped" : "trace"}
+                        tabIndex={0}
+                        aria-label="Stack trace 원문"
+                      >
+                        {current.exception}
+                      </pre>
+                    )}
+                    <p role="status" className="copy-status">
+                      {copyState}
+                    </p>
+                  </>
+                )}
+              </section>
+            </div>
+            <p className="footnote">
+              검색·필터·페이지 탐색은 다음 단계에서 제공됩니다.
+            </p>
+          </main>
+          <footer>
+            logscope<span>서버와 원인을 한곳에서</span>
+          </footer>
         </div>
-        <p className="footnote">
-          검색·필터·페이지 탐색은 다음 단계에서 제공됩니다.
-        </p>
-      </main>
-      <footer>
-        logscope<span>서버와 원인을 한곳에서</span>
-      </footer>
+      </div>
     </div>
   );
 }
