@@ -9,6 +9,7 @@
 | [프론트 설계와 기술 선택의 학습 정리](#frontend-foundation) | 2026-10-27 (작성 시각 미기록) | SSR·도구·화면 상태의 선택 이유 정리. 설치·호환성 검증 전. |
 | [기능별 누적 기록 방식 적용](#frontend-record-history) | 2026-10-27 15:31 KST | 사용자 요청에 따른 문서 누적 방식 변경. 기능 구현 없음. |
 | [영역별 공통 누적 형식 적용](#frontend-common-format-20261027) | 2026-10-27 15:36 KST | 목차를 주제·시간·요약으로 통일하고 기존 내용을 보존. 문서 형식 변경만 수행. |
+| [프론트 초기 환경과 SSR 실행 기반](#frontend-bootstrap-20261027) | 2026-10-27 16:16 KST | 한글 기본 화면·SSR·검사·standalone 실행 구성과 실제 도구 호환 조정. API 연결은 다음 작업. |
 
 <a id="frontend-foundation"></a>
 
@@ -292,3 +293,47 @@ SSR을 고른 이유를 SEO나 속도 개선의 측정 결과로 재구성하지
 - [공통 기록 형식](../learning-record-format.md)
 - [문서 보존 정책](../documentation-policy.md)
 - [AGENTS.md](../../AGENTS.md)
+
+<a id="frontend-bootstrap-20261027"></a>
+
+## 주제: 프론트 초기 환경과 SSR 실행 기반 / 시간: 2026-10-27 16:16 KST
+
+### 1. 사용자 요청과 목표
+
+사용자는 최신 main에서 별도 브랜치와 worktree를 만들고 프론트 초기 환경을 세팅하며 필수 검증까지 진행하도록 요청했다. 백엔드 API 연결은 다음 작업으로 남겼다. 이번 도착점은 실제 브라우저와 Node 컨테이너에서 한글 기본 화면을 열 수 있는 상태다.
+
+### 2. 추가·변경한 내용
+
+frontend/에 Next.js App Router·TypeScript strict·React 프로젝트와 잠금 파일을 만들었다. 루트 페이지는 connection()으로 요청 시 서버에서 렌더링하며 현재 로그 데이터가 연결되지 않았음을 표시한다. 가짜 로그 결과를 넣지 않았다. HTML lang=ko, 본문 바로가기·랜드마크·초점 표시·모바일 줄바꿈을 구성했다.
+
+개발·타입·lint·포맷·빌드·브라우저 검사 명령을 구성하고 verify.sh에서 기존 Java·실제 MySQL·비밀 검사·Compose·이미지 검사와 함께 실행한다. standalone 빌드 뒤 public과 .next/static도 복사한다. 별도 Node 이미지와 로컬 Compose 서비스로 실행하며 기본 node 사용자, loopback 바인딩, 자체 health/live를 사용한다. health UP은 서버가 응답한다는 의미이며 API·DB 준비를 뜻하지 않는다.
+
+### 3. 선택 이유와 대안
+
+처음 채택했던 TypeScript 7.0.2는 tsc가 실행돼도 typescript-eslint가 컴파일러 API 미지원 오류로 중단됐다. 단일 컴파일러로 검사·빌드를 맞추기 위해 TypeScript 6.0.3으로 조정했다. TypeScript 7과 6을 나란히 두는 대안도 있지만 첫 환경에 두 컴파일러를 유지하는 복잡성을 추가하지 않았다.
+
+ESLint 9는 Next 기본 구성과 실행 가능했으나 npm의 지원 종료 경고가 있었다. 최종은 ESLint 10.13.0에 공식 Next 플러그인·React Hooks·typescript-eslint 권장 규칙을 직접 연결한다. peer 제한을 강제 우회하거나 lint를 끄지 않는다. Next.js 16.4.3·React 19.3.1·Node 24.22.1·npm 11.19.1은 유지한다. Prettier 3.9.10과 Playwright 1.64.1도 정확히 고정한다.
+
+JavaScript를 끈 Chromium 확인은 ‘브라우저가 나중에 그렸으니 SSR도 될 것’이라는 추측을 피하기 위해 넣었다. 백엔드 없이도 환경을 확인하고 다음 API 연결 작업의 실패 원인을 나눌 수 있게 했다.
+
+### 4. 동작 확인과 한계
+
+JavaScript 없는 첫 HTML에서도 한글 제목·내용·no-store가 전달된다. Chromium에서 본문 바로가기와 360px 화면의 가로 넘침, 페이지 오류와 API 미호출, health와 정적 자산 제공을 확인했다. 데스크톱 1280px와 모바일 360px 화면도 직접 읽었다. 실제 standalone 서버와 최종 Node 이미지의 생존·SSR 응답을 확인했다.
+
+기존 MySQL 통합 테스트는 1건, 프론트 Chromium은 3개 시나리오 범위다. 전체 접근성·다른 브라우저·부하 성능·로그 API 연결을 보장하지 않는다. Node는 공식 체크섬을 확인한 배포본을 임시 도구 경로에서 실행했으며 시스템 전체 영구 설치를 뜻하지 않는다. 프로덕션 의존성 audit 조회는 당시 알려진 항목 0건이었으나 영구 무취약 보장이 아니다.
+
+### 5. 배운 개념과 남은 일
+
+컴파일러가 실행된다는 사실과 그 컴파일러를 사용하는 도구 전체가 호환된다는 사실은 다르다. 이번에는 타입 검사와 lint를 따로 실행했기 때문에 차이를 발견했다. standalone은 서버 코드만 복사하면 끝나는 것이 아니라 브라우저가 사용할 CSS·JS와 public 자산도 포함해야 한다.
+
+기본 화면은 기능 완료 화면이 아니라 다음 연결을 위한 시작점이다. 다음 작업에서 실제 저장된 합성 로그의 목록·상세, 공통 서버 클라이언트·제한된 GET 중계·오류·기한·응답 상한을 해당 범위에 맞게 결정한다. 현재 백엔드 연결 주소나 조회 중계는 만들지 않았다.
+
+### 6. 관련 문서와 코드
+
+- [이전 기술 선택 기록](#frontend-foundation)
+- [개발·검증 안내와 버전 조정](../frontend-development.md)
+- [프론트 환경 명세](../contracts/frontend-environment-draft.md)
+- [초기 화면](../../frontend/src/app/page.tsx), [레이아웃](../../frontend/src/app/layout.tsx)
+- [명령·버전](../../frontend/package.json), [lint 규칙](../../frontend/eslint.config.mjs)
+- [Chromium 검사](../../frontend/tests/bootstrap.spec.ts), [standalone 준비](../../frontend/scripts/prepare-standalone.mjs)
+- [실행 이미지](../../frontend/Dockerfile), [공통 검증](../../scripts/verify.sh)
