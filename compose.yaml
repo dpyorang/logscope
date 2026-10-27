@@ -39,5 +39,49 @@ services:
     init: true
     stop_grace_period: 15s
     restart: unless-stopped
+  sample-was-1:
+    profiles: [samples]
+    build:
+      context: .
+      dockerfile: sample-was/Dockerfile
+    environment:
+      INSTANCE_ID: was-1
+      SAMPLE_LOG_DIR: /logs
+    ports: ["127.0.0.1:8081:8080"]
+    volumes: ["sample-one-logs:/logs"]
+    restart: unless-stopped
+  vector-1:
+    profiles: [samples]
+    image: timberio/vector:0.60.0-debian
+    volumes:
+      - ./collectors/vector.yaml:/etc/vector/vector.yaml:ro
+      - sample-one-logs:/logs:ro
+      - vector-one-data:/var/lib/vector
+    depends_on: [sample-was-1, app]
+    restart: unless-stopped
+  sample-was-2:
+    profiles: [samples]
+    build:
+      context: .
+      dockerfile: sample-was/Dockerfile
+    environment:
+      INSTANCE_ID: was-2
+      SAMPLE_LOG_DIR: /logs
+    ports: ["127.0.0.1:8082:8080"]
+    volumes: ["sample-two-logs:/logs"]
+    restart: unless-stopped
+  vector-2:
+    profiles: [samples]
+    image: timberio/vector:0.60.0-debian
+    volumes:
+      - ./collectors/vector.yaml:/etc/vector/vector.yaml:ro
+      - sample-two-logs:/logs:ro
+      - vector-two-data:/var/lib/vector
+    depends_on: [sample-was-2, app]
+    restart: unless-stopped
 volumes:
   mysql-data:
+  sample-one-logs:
+  sample-two-logs:
+  vector-one-data:
+  vector-two-data:

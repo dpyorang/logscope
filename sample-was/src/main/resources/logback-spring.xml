@@ -1,0 +1,15 @@
+<configuration>
+  <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+  <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+  <appender name="EVENT_FILE" class="ch.qos.logback.core.rolling.RollingFileAppender">
+    <file>${SAMPLE_LOG_DIR:-./sample-logs}/events.jsonl</file>
+    <immediateFlush>true</immediateFlush>
+    <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+      <fileNamePattern>${SAMPLE_LOG_DIR:-./sample-logs}/events.%d{yyyy-MM-dd}.%i.jsonl</fileNamePattern>
+      <maxFileSize>${SAMPLE_LOG_MAX_SIZE:-10MB}</maxFileSize><maxHistory>2</maxHistory><totalSizeCap>50MB</totalSizeCap>
+    </rollingPolicy>
+    <encoder class="com.logscope.sample.JsonLogEncoder"><instanceId>${INSTANCE_ID:-was-1}</instanceId></encoder>
+  </appender>
+  <logger name="SAMPLE_EVENTS" level="TRACE" additivity="false"><appender-ref ref="EVENT_FILE"/></logger>
+  <root level="INFO"><appender-ref ref="CONSOLE"/></root>
+</configuration>
