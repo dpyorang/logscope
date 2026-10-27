@@ -210,7 +210,7 @@ export function LogExplorer({
         </div>
         <div className="query-info">
           <div>
-            <strong>최근 15분 · 최신순 · 최대 50건</strong>
+            <strong>최근 24시간 · 최신순 · 최대 50건</strong>
             <p>
               조회 범위: <time>{displayTime(range.from)}</time> ~{" "}
               <time>{displayTime(range.to)}</time>
@@ -267,7 +267,7 @@ export function LogExplorer({
               <div className="empty-state">
                 <h3>조회 범위에 로그가 없습니다</h3>
                 <p>
-                  최근 15분에 발생한 로그만 표시합니다. 로그를 새로 전송한 뒤
+                  최근 24시간에 발생한 로그만 표시합니다. 로그를 새로 전송한 뒤
                   새로고침해 주세요.
                 </p>
               </div>

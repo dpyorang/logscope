@@ -31,6 +31,31 @@ test("JavaScript 없이 SSR 목록을 제공하고 브라우저 준비만으로 
     await request.get("http://127.0.0.1:3102/control")
   ).json();
   expect(state.calls).toHaveLength(1);
+  const initial = new URL(state.calls[0], "http://localhost");
+  expect(
+    Date.parse(initial.searchParams.get("to")!) -
+      Date.parse(initial.searchParams.get("from")!),
+  ).toBe(86_400_000);
+  await expect(
+    page.getByText("최근 24시간 · 최신순 · 최대 50건"),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "새로고침", exact: true }).click();
+  await expect
+    .poll(
+      async () =>
+        (await (await request.get("http://127.0.0.1:3102/control")).json())
+          .calls.length,
+    )
+    .toBe(2);
+  const refreshed = await (
+    await request.get("http://127.0.0.1:3102/control")
+  ).json();
+  const next = new URL(refreshed.calls[1], "http://localhost");
+  expect(
+    Date.parse(next.searchParams.get("to")!) -
+      Date.parse(next.searchParams.get("from")!),
+  ).toBe(86_400_000);
+
   const html = await (await request.get("/")).text();
   expect(html).not.toContain("127.0.0.1:3102");
   expect(await page.evaluate(() => "pwned" in window)).toBe(false);

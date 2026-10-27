@@ -51,7 +51,7 @@ export function validRange(range: Range) {
 export function recentRange(): Range {
   const to = new Date();
   return {
-    from: new Date(to.getTime() - 900_000).toISOString(),
+    from: new Date(to.getTime() - 86_400_000).toISOString(),
     to: to.toISOString(),
   };
 }

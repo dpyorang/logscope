@@ -15,7 +15,7 @@ test("실제 MySQL에 저장한 합성 로그를 SSR 목록과 상세에서 읽�
     {
       data: {
         eventId,
-        occurredAt: new Date(Date.now() - 1000).toISOString(),
+        occurredAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
         serviceName: "sample-was",
         instanceId: "was-2",
         level: "ERROR",
