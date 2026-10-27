@@ -12,7 +12,7 @@ jobs:
   verify:
     name: verify
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -22,11 +22,23 @@ jobs:
           distribution: temurin
           java-version: '25'
           cache: gradle
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version-file: frontend/.node-version
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: frontend
+      - run: npx --no-install playwright install --with-deps chromium
+        working-directory: frontend
       - run: ./scripts/verify.sh
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
           name: test-reports
+          retention-days: 7
           path: |
             build/test-results/test/
             build/reports/tests/test/
+            frontend/playwright-report/
+            frontend/test-results/

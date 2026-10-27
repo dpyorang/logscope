@@ -30,5 +30,12 @@ services:
       db:
         condition: service_healthy
     restart: unless-stopped
+  frontend:
+    build: ./frontend
+    ports:
+      - "127.0.0.1:3000:3000"
+    init: true
+    stop_grace_period: 15s
+    restart: unless-stopped
 volumes:
   mysql-data:
