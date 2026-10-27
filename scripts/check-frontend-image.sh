@@ -1,6 +1,6 @@
 #!/bin/sh
 set -eu
-container=$(docker run --detach --publish 127.0.0.1::3000 logscope-frontend:verify)
+container=$(docker run --detach --publish 127.0.0.1::3000 "${LOGSCOPE_FRONTEND_VERIFY_IMAGE:-logscope-frontend:verify}")
 trap 'docker rm --force "$container" >/dev/null' EXIT HUP INT TERM
 attempt=0
 while [ "$attempt" -lt 30 ]; do

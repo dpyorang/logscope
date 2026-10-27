@@ -40,5 +40,7 @@ jobs:
           path: |
             build/test-results/test/
             build/reports/tests/test/
+            sample-was/build/test-results/test/
+            sample-was/build/reports/tests/test/
             frontend/playwright-report/
             frontend/test-results/

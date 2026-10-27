@@ -2,8 +2,10 @@ FROM eclipse-temurin:25-jdk AS build
 WORKDIR /workspace
 COPY gradle gradle
 COPY gradlew build.gradle.kts settings.gradle.kts gradle.properties ./
+COPY sample-was/build.gradle.kts sample-was/build.gradle.kts
 RUN chmod +x gradlew && ./gradlew --no-daemon --console=plain dependencies
 COPY src src
+COPY sample-was/src sample-was/src
 # The required verification job runs full tests with a Docker daemon.
 RUN ./gradlew --no-daemon --console=plain spotlessCheck bootJar
 

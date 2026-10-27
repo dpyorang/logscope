@@ -50,6 +50,7 @@ tasks.withType<Test>().configureEach {
 spotless {
     java {
         googleJavaFormat("1.30.0")
+        target("src/**/*.java", "sample-was/src/**/*.java")
     }
 }
 

@@ -79,6 +79,44 @@ class LogApiTests {
   }
 
   @Test
+  void batchStoresValidItemsAndRejectsPoisonWithoutLosingOthers() throws Exception {
+    var good = event(UUID.randomUUID().toString());
+    var invalid = event(UUID.randomUUID().toString());
+    invalid.put("level", "INVALID");
+    var conflict = new LinkedHashMap<>(good);
+    conflict.put("message", "Different synthetic value");
+    var body = json.writeValueAsString(java.util.List.of(good, good, invalid, conflict));
+    var result = send("POST", "/batch", body, "application/json");
+    assertThat(result.statusCode()).isEqualTo(200);
+    assertThat(tree(result).get("stored").asInt()).isEqualTo(1);
+    assertThat(tree(result).get("duplicates").asInt()).isEqualTo(1);
+    assertThat(tree(result).get("rejected").size()).isEqualTo(2);
+    assertThat(tree(result).get("rejected").get(0).get("index").asInt()).isEqualTo(2);
+    assertThat(tree(result).get("rejected").get(1).get("code").asString())
+        .isEqualTo("EVENT_ID_CONFLICT");
+    assertThat(tree(send("GET", "/" + good.get("eventId"), null, "")))
+        .isEqualTo(json.valueToTree(good));
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM log_events", Integer.class)).isEqualTo(1);
+  }
+
+  @Test
+  void batchEnforcesEnvelopeCountAndByteLimits() throws Exception {
+    for (String body : java.util.List.of("[]", "{}", "[" + "{},".repeat(100) + "{}]"))
+      problem(send("POST", "/batch", body, "application/json"), 400, "VALIDATION_ERROR");
+    var hundred =
+        java.util.stream.IntStream.range(0, 100)
+            .mapToObj(i -> event(UUID.randomUUID().toString()))
+            .toList();
+    assertThat(
+            tree(send("POST", "/batch", json.writeValueAsString(hundred), "application/json"))
+                .get("stored")
+                .asInt())
+        .isEqualTo(100);
+    problem(
+        send("POST", "/batch", " ".repeat(1048577), "application/json"), 413, "PAYLOAD_TOO_LARGE");
+  }
+
+  @Test
   void storesAndReadsSyntheticLogThroughRealHttpAndMysql() throws Exception {
     String id = "7b2a8c30-8d94-4d5f-a6d8-931cf6a6a101";
     var input = event(id);

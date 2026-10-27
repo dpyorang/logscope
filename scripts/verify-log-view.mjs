@@ -18,9 +18,9 @@ try {
  docker(["network","create",prefix]); networkCreated=true;
  const db=start("db",["--network-alias","db","--env-file",join(folder,"db.env"),"--health-cmd",'MYSQL_PWD="$MYSQL_PASSWORD" mysql -h 127.0.0.1 -u "$MYSQL_USER" -D logscope -e "SELECT 1"',"--health-interval","2s","--health-timeout","2s","--health-retries","60","mysql:8.4.13"]);
  const end=Date.now()+120000; while(docker(["inspect","--format","{{.State.Health.Status}}",db])!=="healthy") { if(Date.now()>end) throw new Error("Isolated MySQL readiness timed out"); await new Promise(resolve=>setTimeout(resolve,1000)); }
- const app=start("app",["--network-alias","app","--env-file",join(folder,"app.env"),"--publish","127.0.0.1::8080","logscope:verify"]);
+ const app=start("app",["--network-alias","app","--env-file",join(folder,"app.env"),"--publish","127.0.0.1::8080",(process.env.LOGSCOPE_VERIFY_IMAGE ?? "logscope:verify")]);
  const api=port(app,8080); await ready(`${api}/actuator/health/readiness`);
- const front=start("frontend",["--env","LOGSCOPE_API_BASE_URL=http://app:8080","--publish","127.0.0.1::3000","logscope-frontend:verify"]);
+ const front=start("frontend",["--env","LOGSCOPE_API_BASE_URL=http://app:8080","--publish","127.0.0.1::3000",(process.env.LOGSCOPE_FRONTEND_VERIFY_IMAGE ?? "logscope-frontend:verify")]);
  const ui=port(front,3000); await ready(`${ui}/health/live`);
  const code=await new Promise((resolve,reject)=>{ const child=spawn("npm",["exec","--no","--","playwright","test","--config","playwright.integration.config.ts"],{cwd:"frontend",env:{...process.env,LOGSCOPE_TEST_UI_URL:ui,LOGSCOPE_TEST_API_URL:api},stdio:"inherit"}); child.on("error",reject); child.on("exit",resolve); });
  if(code!==0) throw new Error("Persisted log browser integration failed");

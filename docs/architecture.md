@@ -5,15 +5,16 @@
 ## 데이터 흐름과 책임
 
 ```text
-샘플 WAS 1·2·3 → Spring Boot 수집 API → MySQL
+샘플 WAS 1·2 → Logback JSON 파일 → WAS별 Vector → Spring Boot 배치 수집 API → MySQL
+후속 확장 목표: WAS 3대
 
 최초 화면: 브라우저 → Next.js SSR → Spring Boot 목록 조회 → MySQL
 후속 조회: 브라우저 → Next.js 조회 중계 → Spring Boot 목록·상세 조회 → MySQL
 ```
 
-- 샘플 앱 하나를 서로 다른 instanceId로 실행한다. 전송은 업무 요청 밖에서 수행하고 대기열·재시도·종료는 [API 명세](contracts/log-api-draft.md)의 승인 초기값을 따른다.
+- 샘플 앱 하나를 서로 다른 instanceId로 실행한다. 현재 두 대의 파일·Vector·배치 전송 기준은 [샘플 파이프라인](sample-log-pipeline.md)을 따른다. 이전 WAS 내부 전송 대기열 기준은 해당 기능에서 대체했다.
 - Spring Boot가 수집·검증·중복 판정·저장·검색을 담당한다. API 경로는 /api/v1/logs와 /api/v1/logs/{eventId}다. DB 변경은 새 Flyway migration으로만 수행한다.
-- Next.js는 화면 렌더링과 조회 중계를 담당한다. Spring Boot의 검색·저장 로직을 다시 구현하지 않는다. 샘플 WAS의 수집 POST는 Spring Boot로 직접 보낸다.
+- Next.js는 화면 렌더링과 조회 중계를 담당한다. Spring Boot의 검색·저장 로직을 다시 구현하지 않는다. Vector의 배치 수집 POST는 Spring Boot로 직접 보낸다.
 - SSR은 공통 서버 전용 API 클라이언트로 Spring Boot를 직접 조회한다. 자기 Route Handler를 HTTP로 다시 호출하지 않는다. 브라우저 후속 조회는 같은 클라이언트를 사용하는 제한된 Route Handler로 중계하는 방향을 채택했다. 브라우저용 정확한 경로는 합의 전이다.
 
 ## 프론트에서 채택한 기준
@@ -45,3 +46,7 @@ Next.js·Spring Boot의 실제 이미지·포트·health·네트워크, 조회 �
 ## 2026-10-27 최소 목록·상세 연결 후속 기록
 
 [목록·상세 연결 기준](frontend-log-view.md)에 최근 24시간 SSR·eventId 상세·서버 전용 설정·기본 실패 처리와 이번 단계의 중계/검증 기준을 기록했다. 초기 화면의 ‘API 미연결’ 설명은 당시 구현 기록으로 보존하며 현재 상태는 이 후속 문서를 따른다. 검색·필터·커서와 해당 복구 전체는 다음 작업이다.
+
+## 2026-10-27 파일 수집 후속 변경
+
+사용자 승인으로 샘플 WAS 두 대의 자동·수동 로그를 Logback 파일에 남기고 Vector로 배치 수집한다. 파일 생성·전송·중앙 저장의 책임을 분리하고 Kafka 도입은 미뤘다. 구체적인 한도·부분 실패와 검증 범위는 [샘플 파이프라인](sample-log-pipeline.md)에 기록한다.

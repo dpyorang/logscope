@@ -40,6 +40,40 @@ class LogController {
 
   @PostMapping(produces = MediaType.APPLICATION_JSON_VALUE)
   ResponseEntity<Receipt> collect(HttpServletRequest request) throws IOException {
+    LogEvent event = LogInput.parse(read(request, MAX_BODY));
+    boolean inserted = store.insert(event);
+    Receipt receipt = new Receipt(event.eventId(), inserted ? "STORED" : "DUPLICATE");
+    return inserted
+        ? ResponseEntity.created(URI.create("/api/v1/logs/" + event.eventId())).body(receipt)
+        : ResponseEntity.ok(receipt);
+  }
+
+  @PostMapping(value = "/batch", produces = MediaType.APPLICATION_JSON_VALUE)
+  BatchReceipt collectBatch(HttpServletRequest request) throws IOException {
+    var body = read(request, 1048576);
+    if (body == null || !body.isArray() || body.isEmpty() || body.size() > 100)
+      throw new LogApiException("body", "OUT_OF_RANGE");
+    int stored = 0;
+    int duplicates = 0;
+    var rejected = new java.util.ArrayList<Rejected>();
+    for (int i = 0; i < body.size(); i++) {
+      try {
+        if (parser.writeValueAsBytes(body.get(i)).length > MAX_BODY)
+          throw new LogApiException(413, "PAYLOAD_TOO_LARGE");
+        if (store.insert(LogInput.parse(body.get(i)))) stored++;
+        else duplicates++;
+      } catch (LogApiException error) {
+        rejected.add(new Rejected(i, error.code, error.errors));
+      }
+    }
+    if (!rejected.isEmpty())
+      org.slf4j.LoggerFactory.getLogger(LogController.class)
+          .warn("Batch rejected {} items", rejected.size());
+    return new BatchReceipt(stored, duplicates, rejected);
+  }
+
+  private tools.jackson.databind.JsonNode read(HttpServletRequest request, int limit)
+      throws IOException {
     try {
       var contentType =
           MediaType.parseMediaType(
@@ -55,9 +89,8 @@ class LogController {
     if (request.getHeader("Content-Encoding") != null
         && !request.getHeader("Content-Encoding").equalsIgnoreCase("identity"))
       throw new LogApiException(415, "UNSUPPORTED_MEDIA_TYPE");
-    byte[] body = request.getInputStream().readNBytes(MAX_BODY + 1);
-    if (body.length > MAX_BODY) throw new LogApiException(413, "PAYLOAD_TOO_LARGE");
-    LogEvent event;
+    byte[] body = request.getInputStream().readNBytes(limit + 1);
+    if (body.length > limit) throw new LogApiException(413, "PAYLOAD_TOO_LARGE");
     try {
       String utf8 =
           StandardCharsets.UTF_8
@@ -66,16 +99,15 @@ class LogController {
               .onUnmappableCharacter(CodingErrorAction.REPORT)
               .decode(ByteBuffer.wrap(body))
               .toString();
-      event = LogInput.parse(parser.readTree(utf8));
+      return parser.readTree(utf8);
     } catch (tools.jackson.core.JacksonException | CharacterCodingException e) {
       throw new LogApiException(400, "MALFORMED_JSON");
     }
-    boolean inserted = store.insert(event);
-    Receipt receipt = new Receipt(event.eventId(), inserted ? "STORED" : "DUPLICATE");
-    return inserted
-        ? ResponseEntity.created(URI.create("/api/v1/logs/" + event.eventId())).body(receipt)
-        : ResponseEntity.ok(receipt);
   }
+
+  record Rejected(int index, String code, List<LogApiException.FieldError> errors) {}
+
+  record BatchReceipt(int stored, int duplicates, List<Rejected> rejected) {}
 
   @GetMapping(value = "/{eventId}", produces = MediaType.APPLICATION_JSON_VALUE)
   LogEvent.Detail detail(@PathVariable String eventId) {
