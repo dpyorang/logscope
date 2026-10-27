@@ -195,3 +195,27 @@ Retry-After가 유효한 429·503 응답은 재시도 대기 하한으로 존중
 - 커서 선택의 기술 근거: [Spring Data JPA의 scrolling 설명](https://docs.spring.io/spring-data/jpa/reference/jpa/query-methods.html). 안정된 정렬 키를 사용하는 keyset 탐색을 참고했다.
 - 전송 정책의 기술 근거: [AWS의 타임아웃·재시도·backoff·jitter 설명](https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/). 재시도 횟수 제한·중복 안전성·무작위 대기 원칙을 참고했다. 이 문서의 정확한 수치는 외부 권장 표준이나 측정 결과가 아니라 logscope MVP의 승인된 시작값이다.
 - 이번 변경은 문서 결정만 반영한다. API·DB·migration·샘플 WAS·전송기·테스트·실행 설정은 구현하지 않았으며 검증 성공으로 보고하지 않는다.
+
+## 2026-10-27 첫 저장·최소 조회 구현 범위
+
+사용자의 별도 구현 요청에 따라 기능 단위 개발 방식의 2단계를 구현한다. 위 전체 MVP 명세는 유지하며 현재 지원 범위와 후속 구현을 구분한다. 초기 설정 선행조건은 공통 합의·setup-status의 후속 충족 기록을 따르며, 이번 작업에서 main 보호의 verify 필수·관리자 적용과 Docker/JDK 실행도 확인했다.
+
+- 구현 범위: POST 수집·원문 검증·커밋 후 201, 동일 내용 재전송 200, 내용 충돌 409, eventId 상세 GET, 필수 from/to·최대 24시간·size를 적용하는 최소 목록 GET.
+- 서버·레벨·키워드 필터와 서명 커서는 5단계 구현 대상이다. 현재 해당 파라미터를 보내면 501 QUERY_FEATURE_NOT_IMPLEMENTED를 반환한다. 조건을 무시한 성공으로 오인하지 않도록 한 단계별 응답이다.
+- 조회 결과가 size보다 많으면 아직 다음 커서를 발급할 수 없으므로 501 PAGINATION_NOT_IMPLEMENTED를 반환한다. 일부 결과를 주고 nextCursor=null로 끝인 것처럼 표시하지 않는다. 작은 시간 범위로 다시 조회하거나 상세 GET으로 확인한다. 결과가 size 이하면 전체 결과를 반환하고 양방향 커서는 null이다. 이 임시 501 동작은 커서 기능 도입 때 대체하며 승인된 커서 규칙을 변경하지 않는다.
+- MySQL DATETIME(3)의 표현 범위에 맞춰 수집·조회 시각 연도는 1000~9999를 허용한다. 범위 밖은 OUT_OF_RANGE다. 별도의 현재 시각 기준 과거·미래 제한은 도입하지 않는다. 미래 5분 제한 등은 여전히 제안이다.
+- JDBC와 TransactionTemplate로 INSERT를 명시적으로 실행한다. eventId PK 충돌 시 실패한 트랜잭션이 끝난 후 승자 행을 읽고 모든 정규화 필드를 비교한다. JPA merge가 기존 로그를 덮어쓰거나 선조회 경쟁이 생기지 않게 하는 선택이다. JPA 의존성·설정과 BOM 기준은 유지한다.
+- 새 V2 migration만 추가했다. 본문과 stack trace의 Unicode 저장을 위해 utf8mb4, eventId의 정렬·유일성 비교를 위해 ascii_bin, 시간·ID 정렬 인덱스를 사용한다. exception은 최대 Unicode 본문을 담도록 MEDIUMTEXT다. 기존 V1은 수정하지 않는다.
+- JSON은 UTF-8만 받고 실제 읽은 byte가 256 KiB를 넘으면 413이다. Content-Length가 없는 전송도 같은 제한을 적용한다. 중복 JSON 키·후행 JSON·잘못된 UTF-8은 MALFORMED_JSON, 짝이 맞지 않는 surrogate는 INVALID_FORMAT으로 거절한다. 지원하지 않는 Content-Type·charset·압축 인코딩은 415다.
+
+합성 한 건 확인 예시(로컬 프로필의 격리 환경에서 실행; 주소는 예시):
+
+```sh
+curl -i -X POST 'http://localhost:8080/api/v1/logs' \
+  -H 'Content-Type: application/json' \
+  --data '{"eventId":"7b2a8c30-8d94-4d5f-a6d8-931cf6a6a101","occurredAt":"2026-10-27T03:00:00.123Z","serviceName":"sample-was","instanceId":"was-2","level":"ERROR","message":"Synthetic failure for logscope demo","exception":null}'
+curl 'http://localhost:8080/api/v1/logs/7b2a8c30-8d94-4d5f-a6d8-931cf6a6a101'
+curl 'http://localhost:8080/api/v1/logs?from=2026-10-27T00%3A00%3A00Z&to=2026-10-28T00%3A00%3A00Z'
+```
+
+위 명령은 재현 안내이며 별도로 수동 실행했다고 주장하지 않는다. 실제 HTTP·MySQL 통합 테스트와 전체 검증 결과는 [학습 기록](../learning/backend.md#backend-ingest-read-20261027)에 구분해 남긴다. 기존의 ‘문서 결정만’ 기록은 해당 작성 시점의 이력이며 이번 구현 상태로 덮어쓰지 않는다.

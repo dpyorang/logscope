@@ -9,6 +9,9 @@
 | [백엔드 설계 배경과 핵심 개념](#backend-foundation) | 2026-10-27 (작성 시각 미기록) | 설계 선택·개념·블로그 표현 정리. 당시 도메인 기능 미구현. |
 | [기능별 학습 기록 누적 방식](#learning-record-format) | 2026-10-27 15:32 KST | 사용자 요청에 따른 누적 기록 구조 변경. 기능 구현 없음. |
 | [영역별 공통 누적 형식 적용](#backend-common-format-20261027) | 2026-10-27 15:36 KST | 목차를 주제·시간·요약으로 통일하고 기존 내용을 보존. 문서 형식 변경만 수행. |
+| [합성 로그 수집·저장·최소 조회 구현](#backend-ingest-read-20261027) | 2026-10-27 15:48 KST | 첫 기능 구현·실제 HTTP/MySQL 테스트 통과. 전체 검증·커밋·PR은 아래 상태 참고. |
+| [전체 검증 통과와 첫 기능 PR 생성](#backend-ingest-pr-20261027) | 2026-10-27 15:53 KST | 전체 검증 훅 통과·기능 커밋 및 PR #8 생성. 기록 시점 CI는 실행 중. |
+| [로그 입력 단위 테스트로 오류 원인 분리](#backend-loginput-unit-20261027) | 2026-10-27 16:02 KST | 입력 규칙·경계·오류 코드를 독립적으로 확인하는 테스트 추가. 통합 테스트 유지. |
 
 <a id="backend-foundation"></a>
 
@@ -275,3 +278,121 @@ WAS 요청을 처리하는 사람이 로그 서버의 응답까지 기다리는 
 - [공통 기록 형식](../learning-record-format.md)
 - [문서 보존 정책](../documentation-policy.md)
 - [AGENTS.md](../../AGENTS.md)
+
+<a id="backend-ingest-read-20261027"></a>
+
+## 주제: 합성 로그 수집·저장·최소 조회 구현 / 시간: 2026-10-27 15:48 KST
+
+### 1. 사용자 요청과 목표
+
+사용자가 최신 main에서 별도 worktree를 만들고 합성 로그 한 건 저장·조회, 전체 검증 후 커밋·PR, 학습 기록 추가를 요청했다. 이전 시도의 권한 제한은 이번 승인된 권한 확장으로 원격 갱신에 성공해 해소했다. 최초 기준 main은 9b82ebb이며, 작업 중 병합된 학습·규칙 문서를 받아 최신 0c07601 위로 반영했다. 작업 브랜치는 codex/log-ingest-read다. 목표는 POST로 보낸 합성 로그를 DB에서 다시 읽고, 재전송해도 한 건만 남는 상태다.
+
+### 2. 추가·변경한 내용
+
+V2 migration과 com.logscope.log 패키지를 추가했다. 입력 파서가 필드를 검증하고 저장소가 트랜잭션에서 INSERT한 뒤 HTTP 201을 응답한다. 같은 ID 재전송은 이미 저장된 원문과 비교해 200 또는 409로 구분한다. 상세와 시간 범위 최소 목록 GET을 구현했다. 초기 테스트의 현재 migration 기대값은 V1에서 V2로 변경했다. 기존 학습 본문과 미커밋 공통 학습 양식은 주 작업 폴더에서 보존해 이 worktree의 문서에 포함했다. 공통 규칙·다른 분야의 학습 문서는 수정하지 않았다.
+
+### 3. 선택 이유와 대안
+
+첫 기능에 모든 검색·페이지를 넣지 않는 승인된 진행 방식을 적용했다. 필터·커서 미구현 요청과 추가 페이지 필요 상황은 501로 알리며 조용히 조건을 무시하거나 마지막 페이지로 오인시키지 않는다. 이는 후속 커서 구현 때 대체할 임시 단계다.
+
+JDBC의 명시적 INSERT와 DB PK를 사용해 먼저 조회하고 저장하는 경쟁을 피했다. TransactionTemplate 밖에서 중복 예외를 처리하므로 실패한 트랜잭션에서 다시 읽지 않는다. JPA merge에 의한 기존 행 갱신을 피하고 비교할 원문을 보존하는 선택이다. JPA 관련 기반을 제거한 것은 아니다.
+
+DATETIME(3)·UTC LocalDateTime 변환으로 JVM 기본 시간대에 의존하지 않는다. MEDIUMTEXT는 최대 32,768 코드 포인트 stack trace를 UTF-8로 저장할 수 있게 한다. 코드 포인트 제한과 본문 byte 한도는 별도로 검사한다. MySQL의 날짜 표현 범위를 문서화했으며 미래 5분 제안을 임의 적용하지 않았다.
+
+### 4. 검증 결과와 한계
+
+15:47 KST 실행의 Gradle test 성공: 실제 MySQL 8.4.13 Testcontainers·실제 HTTP 서버에서 총 13개 테스트(기존 초기 테스트 1개 + 로그 API 테스트 12개), 실패·오류·생략 0건을 확인했다. 저장·상세·목록, 정규화 중복, 내용 충돌, 동시 동일 이벤트 8건 중 신규 1/중복 7, 최대 Unicode 원문, 잘못된 필드·시간·쿼리, 256 KiB 정확한 byte 경계·초과·chunked 전송·UTF-8·JSON 오류, 시간 반개구간·동일 시각 순서를 검증했다.
+
+초기 테스트에서는 지원하지 않는 Content-Type 오류가 기본 응답 형식으로 나오는 실패를 발견했다. 컨트롤러 내부의 명시적 검사로 바꿔 application/problem+json을 유지했고 재검증했다. 이 수정은 같은 목표의 구현·검증 과정으로 이 항목에 함께 기록한다.
+
+15:49 KST 첫 verify.sh 실행은 비밀 검사·전체 Gradle 빌드·실제 MySQL 13개 테스트·Spotless·Compose 설정 검증·Docker 이미지 빌드를 모두 통과했다. 이후 최신 main 반영과 기록 추가가 있어 커밋 훅에서 전체 검증을 다시 실행한다. 훅·커밋·PR 결과는 후속 기록으로 구분한다. 샘플 WAS 자동 전송·화면·필터·서명 커서·장애 부하·운영 성능은 이번 검증 범위가 아니다.
+
+### 5. 배운 개념과 남은 일
+
+‘행이 없으면 저장’만으로 동시 요청을 막을 수 없어 DB의 유일성 제약이 필요하다. 저장 성공은 트랜잭션 커밋 뒤에 반환해야 한다. 문자열 길이와 전송 byte 크기는 서로 다르고, Content-Length만 믿으면 길이 없는 요청을 놓칠 수 있다. 구체적인 결과를 테스트로 확인하는 것과 명세로 약속하는 것은 구분해야 한다.
+
+다음은 전체 검증·검토·커밋·PR이고, 후속 기능은 프론트 최소 연결, WAS 전송, 검색·커서 순서다. 기존 명세·커서 초기값을 바꾸지 않는다.
+
+### 6. 관련 문서와 결과 링크
+
+- [이전 설계·학습 기록](#backend-foundation), [공통 기록 형식](../learning-record-format.md).
+- [API 명세와 현재 구현 범위](../contracts/log-api-draft.md), [기능별 진행](../feature-development-workflow.md).
+- [컨트롤러](../../src/main/java/com/logscope/log/LogController.java), [저장소](../../src/main/java/com/logscope/log/LogStore.java), [V2 migration](../../src/main/resources/db/migration/V2__create_log_events.sql).
+- [HTTP·MySQL 테스트](../../src/test/java/com/logscope/LogApiTests.java). PR·CI 링크는 생성·확인 후 별도 후속 기록으로 남긴다.
+
+<a id="backend-ingest-pr-20261027"></a>
+
+## 주제: 전체 검증 통과와 첫 기능 PR 생성 / 시간: 2026-10-27 15:53 KST
+
+### 1. 사용자 요청과 목표
+
+[첫 구현 기록](#backend-ingest-read-20261027)의 후속이다. 사용자가 요청한 전체 검증·커밋·PR까지 진행하고 실제 결과를 설계 결정과 구분해 남긴다.
+
+### 2. 추가·변경한 내용
+
+최신 main 0c07601 위에서 기능 커밋 a256fbe를 만들고 작업 브랜치만 푸시해 PR #8을 생성했다. main 직접 푸시·강제 푸시·병합은 하지 않았다. 이 후속 기록은 문서만 추가하며 기능 동작을 바꾸지 않는다. 총괄에서 main에 병합한 학습 기록·공통 규칙이 그대로 유지되도록 반영했다.
+
+### 3. 선택 이유와 대안
+
+작업 중 main에 새 문서가 병합되어 구현 변경을 임시 보존하고 최신 기준을 반영했다. 기존 학습 문서를 덮어쓰지 않고 구현 기록만 추가했다. DB PK·트랜잭션·엄격한 입력 검증과 미구현 조건의 명시적 응답이라는 선택은 첫 기록과 API 명세에 남겼다.
+
+### 4. 검증 결과와 한계
+
+15:49 KST 최초 verify 성공 후, 최신 main 반영·staged 변경 검토를 거쳐 15:50~15:51 KST 커밋 훅에서 verify.sh를 다시 통과했다. staged·전체 Git 이력 비밀 검사, Gradle clean build, 실제 MySQL Testcontainers/HTTP 테스트 13개(실패·오류·생략 0), Spotless, Compose config, Docker 이미지 빌드를 통과해 커밋이 생성됐다. 작성자·커미터는 GitHub noreply 이메일인지 확인했다. 학습 문서의 로컬 링크도 확인했다.
+
+PR 생성 뒤 CI verify를 실행 중이며 이 기록 시점에는 아직 성공으로 보고하지 않는다. 이 기록을 커밋할 때도 같은 전체 검증 훅을 실행한다. 정확한 최종 PR head와 CI 결과는 PR의 Checks에서 확인한다. 이전 결과를 후속 revision의 결과로 간주하지 않는다. 실제 운영·성능·샘플 WAS·화면 검증이나 PR 병합은 하지 않았다.
+
+### 5. 배운 개념과 남은 일
+
+로컬 테스트 성공, 전체 검증 성공, 커밋 생성, 원격 CI 성공, PR 병합은 각각 별도 결과다. 로컬 검증을 통과해도 CI 결과를 실제로 확인해야 하며, 최신 main 반영으로 문서나 코드가 바뀌면 필요한 검증을 다시 해야 한다. 다음 기능으로 넘어가기 전 PR 검토·CI·병합과 보존 확인을 진행해야 한다.
+
+### 6. 관련 문서와 결과 링크
+
+- [기능 구현 커밋](https://github.com/dpyorang/logscope/commit/a256fbe), [PR #8](https://github.com/dpyorang/logscope/pull/8).
+- [최초 PR CI 실행](https://github.com/dpyorang/logscope/actions/runs/40463634147): 기록 당시 실행 중. 후속 head의 상태는 PR Checks를 따른다.
+- [API 명세](../contracts/log-api-draft.md), [첫 구현·테스트 기록](#backend-ingest-read-20261027), [전체 검증 스크립트](../../scripts/verify.sh).
+
+<a id="backend-loginput-unit-20261027"></a>
+
+## 주제: 로그 입력 단위 테스트로 오류 원인 분리 / 시간: 2026-10-27 16:02 KST
+
+### 1. 사용자 요청과 목표
+
+사용자는 문자열 A의 검증 오류를 HTTP·DB 통신 오류와 구분하려면 단위 테스트가 필요하다고 설명했다. 기존 통합 테스트를 유지하면서 LogInput 단위 테스트를 추가하고 앞으로 모든 백엔드 기능에 단위 테스트를 함께 작성하도록 요청했다. 이 기록은 해당 테스트 변경의 전체 검증과 작업 커밋 이후 작성했다.
+
+### 2. 추가·변경한 내용
+
+LogInputTests는 Spring 컨텍스트·HTTP 서버·MySQL·Docker 없이 LogInput을 직접 호출한다. JUnit Jupiter의 일반·매개변수 테스트와 AssertJ를 사용한다. 기존 통합 테스트 파일과 운영 코드는 변경하지 않았다. 향후 기능에 단위 테스트를 함께 작성하고 통합 테스트를 대체·생략하지 않는 기준을 루트 작업 규칙에 추가했다.
+
+입력값의 누락·null·공백·잘못된 JSON 자료형, 알 수 없는 필드, UUID v4의 대소문자·버전·variant, 로그 레벨, 서비스·서버 이름 패턴, 메시지·예외 길이를 확인한다. Unicode는 ASCII·한글·이모지의 최대 길이와 한 글자 초과, 짝이 없는 surrogate를 구분한다. 시간은 소수 초 정밀도·윤년·날짜 범위·잘못된 UTC 표현을 확인한다. 반환값뿐 아니라 오류의 HTTP 상태·상위 코드·필드명·필드 오류 코드도 검사한다.
+
+### 3. 선택 이유와 대안
+
+통합 테스트만 실패하면 입력 검증·요청 파싱·응답 변환·DB 중 어느 부분인지 더 살펴봐야 한다. 입력 규칙을 직접 테스트하면 같은 A를 넣어 해당 단계가 예상대로 동작하는지 빠르게 좁힐 수 있다. 예를 들어 level=A는 level 필드의 INVALID_ENUM이어야 하고, 잘못된 조회 종료 시각은 to 필드의 INVALID_UTC_TIMESTAMP여야 한다.
+
+데이터를 담은 실제 JSON 노드를 사용하되 네트워크·DB는 연결하지 않는다. 순수 검증 로직에 불필요한 Spring 초기화나 mock을 도입하지 않았다. 여러 입력에서 같은 규칙을 확인할 때 매개변수 테스트를 사용해 실패한 입력 사례를 구분한다. 단순히 내부 메서드가 호출됐다는 사실보다 반환 데이터와 오류라는 관찰 가능한 동작을 검사한다.
+
+### 4. 동작 확인과 한계
+
+40개의 단위 테스트 사례에서 정상 원문·공백·줄바꿈 보존, exception 생략/null의 동등성, 필드별 검증 오류와 Unicode·시각 경계를 확인했다. 예외 없이 처리되는 것만 확인하는 대신 정상 기본 사례는 기대 LogEvent 전체를 비교한다.
+
+단위 테스트는 HTTP 본문의 UTF-8·JSON 파싱, 실제 byte 제한, SQL·트랜잭션·동시성·DB 원문 저장을 보장하지 않는다. 이를 위해 기존 HTTP·실제 MySQL 통합 테스트 13개를 함께 유지한다. 단위 테스트가 통과해도 실제 장애 입력과 동일한 조건을 다뤘는지 확인해야 하며 앱 로직에 문제가 없다고 단정할 수 없다.
+
+### 5. 배운 개념과 남은 일
+
+단위/통합은 JUnit이라는 도구의 차이가 아니라 검사하는 범위의 차이다. 이번 단위 테스트는 입력 규칙을 격리하고, 통합 테스트는 구성 요소 사이의 연결을 검사한다. 두 종류의 결과를 함께 보면 오류 원인을 더 좁힐 수 있다.
+
+특정 문자열 오류를 재현할 때 그 사례를 테스트 입력으로 추가하고 기대 반환값 또는 필드 오류를 명시한다. 다음과 같이 단위 테스트 클래스만 실행하거나 --tests에 메서드 이름을 붙여 진단할 수 있다. 이 명령은 빠른 진단용이며 커밋 전 전체 verify.sh를 대체하지 않는다.
+
+```sh
+./gradlew test --tests com.logscope.log.LogInputTests
+./gradlew test --tests 'com.logscope.log.LogInputTests.rejectsUnknownOrNonCanonicalLevels'
+```
+
+앞으로 새로운 기능에도 정상·실패·경계에 맞는 단위 테스트를 함께 작성하고, DB·HTTP 연결에 의존하는 성질은 통합 테스트로 확인한다. 아직 구현하지 않은 필터·커서·자동 전송에 대한 테스트까지 이번에 만들지는 않았다.
+
+### 6. 관련 문서와 코드
+
+- [LogInput 단위 테스트](../../src/test/java/com/logscope/log/LogInputTests.java), [입력 검증](../../src/main/java/com/logscope/log/LogInput.java), [오류 정의](../../src/main/java/com/logscope/log/LogApiException.java).
+- [기존 HTTP·MySQL 테스트](../../src/test/java/com/logscope/LogApiTests.java), [API 명세](../contracts/log-api-draft.md), [작업 규칙](../../AGENTS.md).
+- [이전 저장·조회 학습](#backend-ingest-read-20261027). 기존 설계 설명은 당시 기록이며 이 항목의 테스트 구현과 구분한다.
