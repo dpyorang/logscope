@@ -63,3 +63,7 @@ DB 컨테이너에만 전달하며 앱 컨테이너에는 넣지 않는다.
 - 운영 대상 지정 후 별도 DB에서 백업 복구 리허설
 
 현재 통과 여부는 [설정 진행 상태](docs/setup-status.md)에 기록한다.
+
+## 프론트 초기 환경
+
+frontend/의 TypeScript·Next.js SSR 기본 화면은 [실행·검사 안내](docs/frontend-development.md)를 따른다. 백엔드 API 연동은 다음 작업이다.

@@ -50,3 +50,11 @@ gitleaks-report.*
 
 .gradle/
 .kotlin/
+
+# Frontend generated files
+node_modules/
+.next/
+*.tsbuildinfo
+playwright-report/
+test-results/
+frontend/next-env.d.ts

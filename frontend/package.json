@@ -1,0 +1,39 @@
+{
+  "name": "logscope-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "npm@11.19.1",
+  "engines": {
+    "node": "24.22.1",
+    "npm": "11.19.1"
+  },
+  "scripts": {
+    "check:runtime": "node scripts/check-runtime.mjs",
+    "dev": "next dev --hostname 127.0.0.1",
+    "typecheck": "next typegen && tsc --noEmit",
+    "lint": "eslint . --max-warnings 0",
+    "format:check": "prettier --check .",
+    "format": "prettier --write .",
+    "build": "next build && node scripts/prepare-standalone.mjs",
+    "start": "node .next/standalone/server.js",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "next": "16.4.3",
+    "react": "19.3.1",
+    "react-dom": "19.3.1"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@next/eslint-plugin-next": "16.4.3",
+    "@playwright/test": "1.64.1",
+    "@types/node": "24.19.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "eslint": "10.13.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "prettier": "3.9.10",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1"
+  }
+}
