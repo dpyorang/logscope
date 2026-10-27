@@ -12,9 +12,11 @@ function item(eventId = id) {
     instanceId: eventId === id ? "was-2" : "was-1",
     level: eventId === id ? "ERROR" : "INFO",
     message:
-      eventId === id
-        ? "합성 오류 <script>window.pwned=true</script>"
-        : "정상 합성 로그",
+      mode === "long"
+        ? "긴 합성 한글 메시지와 경계 확인 ".repeat(100)
+        : eventId === id
+          ? "합성 오류 <script>window.pwned=true</script>"
+          : "정상 합성 로그",
   };
 }
 function json(res, value, status = 200, type = "application/json") {
@@ -93,7 +95,12 @@ const server = http.createServer((req, res) => {
       ...item(eventId),
       exception:
         eventId === id
-          ? "java.lang.IllegalStateException: synthetic failure\n\tat com.logscope.sample.DemoService.run(DemoService.java:24)"
+          ? "java.lang.IllegalStateException: synthetic failure\n\tat com.logscope.sample.DemoService.run(DemoService.java:24)" +
+            (mode === "long"
+              ? "\n\tat com.logscope.sample.LongSyntheticService.execute(LongSyntheticService.java:123)".repeat(
+                  100,
+                )
+              : "")
           : null,
     });
   }

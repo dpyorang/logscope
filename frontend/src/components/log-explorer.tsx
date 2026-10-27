@@ -183,12 +183,15 @@ export function LogExplorer({
   return (
     <div className="shell explorer-shell">
       <header className="site-header">
-        <Link className="brand" href="/" aria-label="logscope 홈">
-          <span className="brand-mark" aria-hidden="true">
-            L
-          </span>
-          logscope
-        </Link>
+        <div className="header-context">
+          <Link className="brand" href="/" aria-label="logscope 홈">
+            <span className="brand-mark" aria-hidden="true">
+              L
+            </span>
+            logscope
+          </Link>
+          <span className="header-page">로그 탐색</span>
+        </div>
         <span className="environment-label">개발 환경</span>
       </header>
       <main id="main-content" className="explorer-main" tabIndex={-1}>
