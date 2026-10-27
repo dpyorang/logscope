@@ -207,3 +207,51 @@ test("생존 확인과 정적 자산을 제공한다", async ({ request }) => {
   expect(await r.json()).toEqual({ status: "UP" });
   expect((await request.get("/mark.svg")).status()).toBe(200);
 });
+
+test("밝은 화면에서 긴 원문·좁은 화면·확대와 선택 표시를 유지한다", async ({
+  page,
+  request,
+}, testInfo) => {
+  await mode(request, "long");
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/");
+  await expect(page.locator(".header-context")).toContainText("로그 탐색");
+  await page.getByRole("button", { name: /was-2.*상세 보기/ }).click();
+  await expect(page.getByLabel("Stack trace 원문")).toContainText(
+    "LongSyntheticService",
+  );
+  await page.screenshot({
+    path: testInfo.outputPath("light-desktop.png"),
+    fullPage: true,
+  });
+  for (const width of [1199, 640, 360]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    const list = await page.locator(".list-panel").boundingBox();
+    const detail = await page.locator(".detail-panel").boundingBox();
+    expect(detail!.y).toBeGreaterThan(list!.y);
+  }
+  await page.screenshot({
+    path: testInfo.outputPath("light-mobile.png"),
+    fullPage: true,
+  });
+  await page.getByRole("button", { name: "줄바꿈 켜짐" }).click();
+  await expect(page.getByLabel("Stack trace 원문")).toHaveCSS(
+    "white-space",
+    "pre",
+  );
+  await page.addStyleTag({ content: "body { zoom: 2; }" });
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= innerWidth,
+    ),
+  ).toBe(true);
+  await page.getByRole("button", { name: "닫기", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: /was-2.*상세 보기/ }),
+  ).toBeFocused();
+});
