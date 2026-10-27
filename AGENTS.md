@@ -5,6 +5,7 @@
 - 초기 세팅의 실제 검증·GitHub 연결·브랜치 보호 확인이 끝나기 전 도메인 기능을 구현하지 않는다.
 - Java 25, Spring Boot 4.1.2, MySQL 8.4.13 LTS를 사용한다. JPA, Hibernate, JDBC, Flyway, Testcontainers는 Boot BOM 버전을 따른다.
 - Java 서버 빌드는 Gradle 9.8.2 Wrapper와 Kotlin DSL만 사용한다. 프론트 의존성과 Next.js 빌드는 npm 및 잠금 파일로 관리한다. 기능 단위 Conventional Commit을 작성한다.
+- 커밋 메시지는 `feat:`, `fix:`, `docs:`, `add:` 등 변경 성격에 맞는 유형 접두사를 붙이고, 접두사 뒤의 요약과 본문(description)은 한글로 작성한다. 코드 식별자·제품명 등 필요한 기술 용어는 원문을 유지할 수 있다. 예: `feat: 로그 샘플 구현`. 본문이 필요한 경우 한글로 변경 내용과 이유를 설명한다.
 - 매 커밋 직전 `./scripts/verify.sh`가 성공해야 한다. 빌드, 실제 MySQL Testcontainers 테스트, Spotless 검사, Compose 검증 및 이미지 빌드 실패 시 커밋하지 않는다.
 - `git config core.hooksPath .githooks`를 설정한다. `--no-verify`, 테스트 스킵, Docker 미사용 시 테스트 자동 생략을 금지한다.
 - 포맷 수정: `./gradlew spotlessApply`. 변경 후 전체 검증을 다시 실행한다.
