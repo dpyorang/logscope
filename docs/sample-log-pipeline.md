@@ -59,3 +59,7 @@ DB 장애는 503으로 응답하며 앞선 항목은 이미 저장됐을 수 있
 ## 기술 근거
 
 [Vector file source](https://vector.dev/docs/reference/configuration/sources/file/)의 파일 추적·체크포인트와 [HTTP sink](https://vector.dev/docs/reference/configuration/sinks/http/)의 배치·버퍼·재시도 정의를 사용한다. 구현 버전은 [Vector v0.60.0](https://github.com/vectordotdev/vector/releases/tag/v0.60.0)으로 고정한다. Kafka는 수집기 뒤의 분산 버퍼가 필요해질 때 검토하며 지금의 두 WAS 데모에는 별도 운영 부담을 추가하지 않는다.
+
+## 검증 지연과 제한된 진단
+
+단독 이벤트 검증은 자동 생성을 잠시 멈춰 다른 로그가 정체를 풀지 못하게 한다. 공유 실행 환경의 지연과 영구 정체를 구분하기 위해 최대 30초 동안 관찰하고 실제 소요 밀리초를 남긴다. 이는 제품 응답 시간 목표나 Vector 배치 대기 2초의 변경이 아니다. 실패하면 파일의 행 수·JSON 오류 수·대기 이벤트 존재 여부와 HTTP 상태·배치 집계만 출력한다. 원문·eventId·주소·호스트명·진단 헤더는 출력하지 않는다. 파일 미기록, 수집기 전송 정체, 중앙 항목 거절을 구분하기 위한 검증용 진단이며 운영 지표를 추가하지 않는다.

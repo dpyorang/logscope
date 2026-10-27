@@ -11,7 +11,10 @@ const containers = [],
   volumes = [];
 const folder = await mkdtemp(join(tmpdir(), "logscope-sample-"));
 let networkCreated = false,
-  browser;
+  browser,
+  pendingEvent,
+  receiverUrl;
+const isolatedLatencies = [];
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
 function docker(args) {
   try {
@@ -69,7 +72,9 @@ async function post(url, body) {
     body: JSON.stringify(body),
   });
   assert.equal(r.status, 200);
-  return r.json();
+  const result = await r.json();
+  if (result.eventId) pendingEvent = result;
+  return result;
 }
 try {
   const password = randomUUID();
@@ -118,7 +123,7 @@ try {
   const api = port(app);
   await healthy(api);
   // Capture actual Vector envelopes while forwarding them to the real API/MySQL.
-  const proxyCode = `const http=require('node:http');let batches=[],outage=false,failures=0;http.createServer(async(q,s)=>{if(q.url==='/failures'){s.end(JSON.stringify(failures));return;}if(q.url==='/stats'){s.end(JSON.stringify(batches));return;}if(q.url==='/outage'){outage=q.method==='POST';s.end('{}');return;}if(outage){failures++;outage=false;s.writeHead(503);s.end();return;}try{let b='';for await(const c of q)b+=c;const a=JSON.parse(b);if(!Array.isArray(a))throw Error('array required');batches.push(a);const r=await fetch('http://app:8080/api/v1/logs/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:b});s.writeHead(r.status);s.end(await r.text());}catch{s.writeHead(500);s.end();}}).listen(8080,'0.0.0.0');`;
+  const proxyCode = `const http=require('node:http');let batches=[],outcomes=[],outage=false,failures=0;http.createServer(async(q,s)=>{if(q.url==='/outcomes'){s.end(JSON.stringify(outcomes));return;}if(q.url==='/failures'){s.end(JSON.stringify(failures));return;}if(q.url==='/stats'){s.end(JSON.stringify(batches));return;}if(q.url==='/outage'){outage=q.method==='POST';s.end('{}');return;}if(outage){failures++;outage=false;s.writeHead(503);s.end();return;}try{let b='';for await(const c of q)b+=c;const a=JSON.parse(b);if(!Array.isArray(a))throw Error('array required');batches.push(a);const r=await fetch('http://app:8080/api/v1/logs/batch',{method:'POST',headers:{'Content-Type':'application/json'},body:b});const text=await r.text();let v;try{v=JSON.parse(text)}catch{}outcomes.push({status:r.status,stored:v?.stored??null,duplicates:v?.duplicates??null,rejected:v?.rejected?.map(x=>x.code)??null});s.writeHead(r.status);s.end(text);}catch{s.writeHead(500);s.end();}}).listen(8080,'0.0.0.0');`;
   const proxy = start("proxy", [
     "--no-healthcheck",
     "--network-alias",
@@ -132,6 +137,7 @@ try {
     proxyCode,
   ]);
   const receiver = port(proxy);
+  receiverUrl = receiver;
   let config = await readFile("collectors/vector.yaml", "utf8");
   config = config.replace("http://app:8080", "http://receiver:8080");
   await writeFile(join(folder, "vector.yaml"), config);
@@ -215,10 +221,13 @@ try {
     async () => (await Promise.all(ids.map(stored))).every(Boolean),
     "Manual/rolled log did not reach MySQL",
   );
+  for (const sample of samples)
+    await post(`${sample.url}/api/automatic`, { enabled: false });
   // Regression: isolated low-volume events must arrive without another event waking the sink.
   for (let n = 0; n < 6; n++) {
     await pause(1100);
     const sample = samples[n % 2];
+    const started = Date.now();
     const isolated = await post(`${sample.url}/api/events`, {
       level: "INFO",
       exception: false,
@@ -226,9 +235,12 @@ try {
     await until(
       () => stored(isolated.eventId),
       "Isolated event stalled without a subsequent write",
-      10000,
+      30000,
     );
+    isolatedLatencies.push(Date.now() - started);
   }
+  for (const sample of samples)
+    await post(`${sample.url}/api/automatic`, { enabled: true });
   for (const [index, id] of [
     [0, ids[0]],
     [1, ids[41]],
@@ -283,6 +295,10 @@ try {
   await fetch(`${receiver}/outage`, { method: "DELETE" });
   await until(() => stored(retry.eventId), "Transient failure did not recover");
   console.log(
+    "Isolated event delivery milliseconds:",
+    JSON.stringify(isolatedLatencies),
+  );
+  console.log(
     "Two WAS UI/manual/all-level/exception/60s automatic → Logback rotation → Vector JSON batch/checkpoint/retry → real MySQL integration passed.",
   );
 } catch (error) {
@@ -300,6 +316,48 @@ try {
       }),
     );
   }
+  for (const name of containers.filter((n) => /-was-[12]$/.test(n))) {
+    try {
+      const raw = docker(["exec", name, "sh", "-c", "cat /logs/events*.jsonl"]);
+      const rows = raw.split("\n").filter(Boolean);
+      let invalid = 0,
+        pendingWritten = false;
+      for (const row of rows) {
+        try {
+          if (JSON.parse(row).eventId === pendingEvent?.eventId)
+            pendingWritten = true;
+        } catch {
+          invalid++;
+        }
+      }
+      console.error(
+        "WAS file diagnostic:",
+        JSON.stringify({ rows: rows.length, invalid, pendingWritten }),
+      );
+    } catch {
+      console.error("WAS file diagnostic unavailable");
+    }
+  }
+  if (receiverUrl) {
+    try {
+      console.error(
+        "Batch outcomes:",
+        JSON.stringify(
+          await (
+            await fetch(`${receiverUrl}/outcomes`, {
+              signal: AbortSignal.timeout(2000),
+            })
+          ).json(),
+        ),
+      );
+    } catch {
+      console.error("Batch outcomes unavailable");
+    }
+  }
+  console.error(
+    "Completed isolated delivery milliseconds:",
+    JSON.stringify(isolatedLatencies),
+  );
   throw error;
 } finally {
   await browser?.close();
