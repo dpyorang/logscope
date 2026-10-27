@@ -17,28 +17,35 @@ Codex 표시 이름은 코드 이름과 별개다. 앱에 연결된 경로는 �
 초기 검증이 통과한 커밋만 원격에 업로드한다. CI 최초 실행이 성공하면 main에
 다음 보호 설정을 적용하고 GitHub API의 조회 응답으로 실제 적용을 확인한다.
 
-- PR 필수, 승인 1명 이상, 새 커밋에 기존 승인 해제
+- PR 필수, 다른 사람의 승인 요구는 0명, 새 커밋에 기존 승인 해제
 - 필수 상태 검사: `verify` (CI 워크플로의 verify job), 최신 main 반영 필수
 - 관리자도 보호 적용, 대화 해결 필수, force push 및 삭제 금지
 - 기본 Actions 권한 read-only, PR의 secret 접근 금지
 
-사용자 한 명만 관리하는 저장소라도 승인 요구를 임의로 완화하지 않는다.
+1인 개발에 대한 사용자 결정에 따라 다른 사람의 승인은 요구하지 않는다.
+승인 0명은 직접 푸시 허용을 뜻하지 않으며 PR과 CI `verify` 통과는 필수다.
 GitHub 플랜/공개 여부에 따른 보호 지원 여부도 실제 적용 결과로 확인한다.
 대상은 `dpyorang/logscope`다. 최초 CI 성공 후 `./scripts/configure-github.sh`로
 저장된 정책을 적용하고 조회한다. 기존 저장소라면 기존 브랜치/보호 정책을 먼저 조회하여
-의도하지 않은 정책 약화가 없는지 확인한다. 이 스크립트는 아직 실행되지 않았다.
+의도하지 않은 정책 약화가 없는지 확인한다.
 
-2026-10-26 실제 조회 결과: 현재 계정 플랜에서 private 저장소의 main 보호 API가
-HTTP 403과 GitHub Pro 필요 응답을 반환했다. private는 유지한다. 플랜 변경 후
-정책을 적용하고 재조회하기 전까지 원격 보호가 구성되었다고 간주하지 않는다.
+2026-10-26에는 private 저장소의 main 보호 API가 HTTP 403과 GitHub Pro 필요
+응답을 반환했다. 2026-10-27 사용자가 저장소를 public으로 전환한 뒤,
+승인 0명·PR 필수·CI `verify` 필수 정책을 API로 적용하고 재조회했다.
+main의 `protected=true`, 최신 main 반영 필수, 관리자 적용, 대화 해결 필수,
+force push 및 삭제 금지를 확인했다.
 
 ## 환경과 비밀
 
-저장소는 현재 private이며 향후 public 전환을 전제로 관리한다. 실제 `.env`는
+저장소는 현재 public이며 비밀 관리 기준을 계속 적용한다. 실제 `.env`는
 Git에 넣지 않고 `.env.example`에는 예시만 기록한다. private 전환은 이미 노출된
 비밀을 회수하지 않으므로 비밀이 발견되면 먼저 폐기·재발급한다. 공개 전
 `./scripts/check-secrets.sh`로 전체 이력을 검사하고 내부 주소·개인정보도 검토한다.
 자동 탐지는 모든 종류의 민감정보를 보장하지 않으므로 변경 내용 검토를 병행한다.
+비밀 검사 스크립트는 호스트 Git으로 staged diff와 모든 로컬 ref의 전체 이력을
+추출한 뒤 네트워크가 차단된 Gitleaks 컨테이너에서 마스킹 검사한다. 일반 clone과
+worktree 모두 지원하며 shallow 저장소, 빈 이력과 Git 조회 실패는 오류로 처리한다.
+CI는 `fetch-depth: 0`을 유지한다.
 
 local은 compose.yaml과 gitignore 처리된 .env를 사용한다. 운영은 별도 관리형
 MySQL 8.4 LTS와 compose.prod.yaml을 사용한다. staging도 운영과 분리된 DB와

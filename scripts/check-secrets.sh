@@ -17,11 +17,26 @@ fi
 image=ghcr.io/gitleaks/gitleaks:v8.30.1
 # Pull before disabling container networking. Repository data stays on this machine.
 docker image inspect "$image" >/dev/null 2>&1 || docker pull "$image"
-patch=$(mktemp)
-trap 'rm -f "$patch"' EXIT HUP INT TERM
-git diff --cached --no-ext-diff --no-color > "$patch"
+scan_dir=$(mktemp -d)
+trap 'rm -rf "$scan_dir"' EXIT HUP INT TERM
+patch="$scan_dir/staged.patch"
+history="$scan_dir/history.patch"
+git diff --cached --no-ext-diff --no-textconv --no-color > "$patch"
 docker run --rm --network none -i "$image" stdin --redact --no-banner < "$patch"
-docker run --rm --network none \
-  -v "$root/.git:/repo/.git:ro" -w /repo \
-  -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0=/repo \
-  "$image" git --log-opts=--all --redact --no-banner .
+# Resolve worktree metadata on the host instead of mounting its .git pointer into
+# Docker. Materialize the complete log before scanning so Git errors cannot be
+# hidden by a pipeline or by Gitleaks reporting success after scanning no commits.
+if [ "$(git rev-parse --is-shallow-repository)" != false ]; then
+  printf 'Full Git history is required; shallow repositories are not supported.\n' >&2
+  exit 1
+fi
+commit_count=$(git rev-list --all --count)
+if [ "$commit_count" -eq 0 ]; then
+  printf 'No commits available for the full-history secret scan.\n' >&2
+  exit 1
+fi
+git log --all --full-history --root --diff-merges=separate --no-renames \
+  --patch --no-ext-diff --no-textconv \
+  --no-color --format=fuller > "$history"
+printf 'Scanning full Git history: %s commits\n' "$commit_count"
+docker run --rm --network none -i "$image" stdin --redact --no-banner < "$history"
