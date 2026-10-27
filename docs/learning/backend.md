@@ -13,6 +13,7 @@
 | [영역별 공통 누적 형식 적용](#backend-common-format-20261027) | 2026-10-27 15:36 KST | 목차를 주제·시간·요약으로 통일하고 기존 내용을 보존. 문서 형식 변경만 수행. |
 | [합성 로그 수집·저장·최소 조회 구현](#backend-ingest-read-20261027) | 2026-10-27 15:48 KST | 합성 로그 저장·중복 판정·최소 조회와 실제 HTTP/MySQL 동작 확인. |
 | [로그 입력 단위 테스트로 오류 원인 분리](#backend-loginput-unit-20261027) | 2026-10-27 16:02 KST | 입력 규칙·경계·오류 코드를 독립적으로 확인하는 테스트 추가. 통합 테스트 유지. |
+| [두 WAS의 파일 로그와 Vector 배치 수집](#backend-vector-samples-20261027) | 2026-10-27 23:10 KST | 자동·수동 생성과 파일·배치 수집 구현. 디스크 버퍼 정체 회피와 검증 이미지 격리 이유를 기록. |
 
 <a id="backend-foundation"></a>
 
@@ -365,3 +366,48 @@ LogInputTests는 Spring 컨텍스트·HTTP 서버·MySQL·Docker 없이 LogInput
 - [LogInput 단위 테스트](../../src/test/java/com/logscope/log/LogInputTests.java), [입력 검증](../../src/main/java/com/logscope/log/LogInput.java), [오류 정의](../../src/main/java/com/logscope/log/LogApiException.java).
 - [기존 HTTP·MySQL 테스트](../../src/test/java/com/logscope/LogApiTests.java), [API 명세](../contracts/log-api-draft.md), [작업 규칙](../../AGENTS.md).
 - [이전 저장·조회 학습](#backend-ingest-read-20261027). 기존 설계 설명은 당시 기록이며 이 항목의 테스트 구현과 구분한다.
+
+<a id="backend-vector-samples-20261027"></a>
+
+## 주제: 두 WAS의 파일 로그와 Vector 배치 수집 / 시간: 2026-10-27 23:10 KST
+
+### 1. 사용자 요청과 목표
+
+두 샘플 WAS가 1분마다 랜덤 로그를 만들고 수동 버튼으로도 생성하도록 요청했다. Logback 파일을 Vector가 읽어 묶어 전송하는 방식을 승인했으며 Kafka는 뒤로 미뤘다. 로그 탐색 화면은 기존 프론트의 책임으로 유지하고 이번 화면은 합성 로그 발생 도구다.
+
+### 2. 추가·변경한 내용
+
+sample-was Gradle 모듈 하나를 was-1·was-2로 실행한다. TRACE부터 ERROR까지 생성하고 예외 버튼은 실제 합성 예외의 stack trace를 포함한다. 전용 Logback logger가 중앙 API의 일곱 필드만 JSON Lines로 기록한다. 개행을 escape하므로 예외가 여러 줄이어도 파일에서는 한 행이다. 프레임워크·수집기 자체 진단은 대상 파일에서 제외한다.
+
+Vector는 WAS별 파일 볼륨을 읽기 전용으로 마운트하고 회전 파일도 읽는다. 최대 100건·직렬화 전 64KiB·2초 기준으로 배치 전송하고 HTTP sink acknowledgements와 100건 메모리 버퍼를 사용하고 체크포인트는 별도 볼륨에 보존한다. 서버에는 기존 단건 경로와 별도로 /api/v1/logs/batch를 추가했다. 배열 1~100건·본문 1MiB 제한, 항목별 256KiB·기존 입력 규칙을 적용한다. 잘못된 항목은 index·code로 거절하고 정상·중복 항목을 유지한다.
+
+### 3. 선택 이유와 대안
+
+WAS가 중앙 HTTP 호출·재시도 대기열을 직접 관리하는 대신 파일 생성과 전달을 나눴다. 수집기 교체와 장애 분석이 쉬워지고 여러 이벤트를 한 요청으로 보낼 수 있다. Kafka는 더 큰 버퍼·여러 소비자 등 요구가 생길 때 검토한다. 처음 시도한 0.60.0 디스크 버퍼는 저빈도 이벤트가 버퍼에 남고 sink로 넘어가지 않는 정체를 재현했다. 공식 이슈 #26523에도 같은 증상이 있어 메모리 버퍼로 변경하고 전송 확인을 파일 source까지 연결했다. 미출시 패치를 직접 배포하거나 가짜 주기 로그로 문제를 숨기지 않았다. 공식 수정 버전은 후속 검증 대상이다.
+
+Logback의 일반 진단 JSON에는 중앙 명세 밖의 필드가 포함될 수 있어 명시적인 encoder로 일곱 필드를 맞췄다. UUID는 파일 기록 전 한 번 발급해 전송 재시도에도 같은 값을 유지한다. 화면 응답 LOG_GENERATED는 로깅 호출 완료만 뜻하며 중앙 저장이나 fsync를 보장하지 않는다.
+
+### 4. 동작 확인과 한계
+
+JUnit 단위 테스트로 레벨·잘못된 입력·예외·UUID/MDC·JSON 행·수동/자동 정지·배치 집계·과대 항목·DB 장애 전파를 분리 확인했다. 실제 MySQL/HTTP 테스트로 혼합 배치의 신규·중복·거절·충돌과 100건·본문 상한을 확인했다. 기존 단건·조회 통합 테스트도 유지했다.
+
+실제 브라우저에서 두 WAS의 예외 버튼을 누르고 다섯 레벨·1KB 테스트 회전·기본 60초 자동 생성과 추가 로그 없이 고립된 이벤트의 전달이 실제 Vector JSON 배열과 MySQL 상세까지 이어짐을 확인했다. 수집기 재시작 뒤 새 이벤트 수집과 한 번의 503 후 재시도를 확인했다. 초기 시간 기반 장애 주입은 유한 재시도가 소진될 수 있어 실패했고, 단일 503을 확실히 주입하는 방식으로 바꿨다. 최종 검증은 장기 장애 복구 보장이 아니다.
+
+Vector는 HTTP 200의 항목별 거절을 재처리하지 않는다. 서버 WARN은 거절 건수만 남긴다. 메모리 버퍼는 강제 종료 시 사라질 수 있으며 원본 파일·마지막 체크포인트가 남아 있어야 다시 읽을 수 있다. DB 장애 전 앞선 항목이 저장될 수 있으므로 전체 배치 재전달은 중복 판정으로 안전하게 처리한다. 유한 재시도 소진·회전 파일 보존 삭제·디스크 장애에서는 누락될 수 있다.
+
+검증 이미지도 worktree 사이에서 공유되는 Docker 이름이다. 고정 verify 태그가 다른 실행에 의해 덮어써지면 새 API가 없는 이미지로 405를 받을 수 있어, 전체 검증이 자기 이미지 태그를 생성·전달·정리하도록 바꿨다. 네트워크·볼륨뿐 아니라 이미지 참조도 격리해야 같은 코드를 확인할 수 있다.
+
+### 5. 배운 개념과 남은 일
+
+Logback은 애플리케이션의 로그를 파일에 남기고 Vector는 그 파일의 읽은 위치를 기억하며 중앙으로 전달한다. 배치는 여러 로그를 한 HTTP 요청에 담는 방식이며, 체크포인트는 파일을 어디까지 읽었는지 기록하는 위치다. 중앙 저장 확인은 이 위치와 다르다. 같은 eventId로 다시 보내도 한 건만 남기는 중복 판정이 재시도의 안전장치다.
+
+범용 로그·장기 장애·격리와 재처리·운영 인증·Kafka·세 번째 WAS는 후속 설계다. 기존 최소 목록은 size보다 많은 결과에 아직 501을 반환하므로 자동 생성으로 데이터가 쌓이면 조회 기간을 줄여 확인하고 커서 구현에서 해결해야 한다. 이번 변경은 검색·페이지 기능을 구현하지 않는다.
+
+### 6. 관련 문서와 코드
+
+- [샘플 파이프라인과 실행·한계](../sample-log-pipeline.md)
+- [API 명세](../contracts/log-api-draft.md), [아키텍처](../architecture.md)
+- [샘플 생성 코드](../../sample-was/src/main/java/com/logscope/sample/EventGenerator.java), [JSON encoder](../../sample-was/src/main/java/com/logscope/sample/JsonLogEncoder.java)
+- [Vector 디스크 버퍼 공식 이슈](https://github.com/vectordotdev/vector/issues/26523)
+- [Vector 설정](../../collectors/vector.yaml), [배치 API](../../src/main/java/com/logscope/log/LogController.java)
+- [배치 단위 테스트](../../src/test/java/com/logscope/log/BatchTests.java), [샘플 단위 테스트](../../sample-was/src/test/java/com/logscope/sample/SampleTests.java), [전체 파이프라인 검증](../../scripts/verify-sample-pipeline.mjs)
