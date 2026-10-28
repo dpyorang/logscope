@@ -59,7 +59,16 @@ export async function read<T>(
           problem: {
             status: response.status,
             code: value.code,
-            errors: [],
+            errors: Array.isArray(value.errors)
+              ? value.errors
+                  .filter(
+                    (item): item is { field: string; code: string } =>
+                      record(item) &&
+                      typeof item.field === "string" &&
+                      typeof item.code === "string",
+                  )
+                  .map((item) => ({ field: item.field, code: item.code }))
+              : [],
             ...(response.headers.get("retry-after")
               ? { retryAfter: response.headers.get("retry-after")! }
               : {}),
@@ -143,10 +152,20 @@ export class LiveStore {
       void this.connect();
     }
   }
+  startFresh() {
+    this.active = true;
+    this.cursor = null;
+    this.terminal = null;
+    this.failures = 0;
+    this.update({ paused: false, pausedAt: null, phase: "connecting" });
+    void this.refresh();
+  }
   stop() {
     this.active = false;
     this.disconnect();
     this.refreshController?.abort();
+    this.refreshController = null;
+    if (this.state.busy) this.update({ busy: false });
   }
   private tick() {
     clearInterval(this.expiry);

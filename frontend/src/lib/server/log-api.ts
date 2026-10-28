@@ -1,4 +1,11 @@
 import "server-only";
+import {
+  searchResult,
+  parameters,
+  SEARCH_SERVER_TIMEOUT,
+  type SearchQuery,
+  type SearchResult,
+} from "../search";
 import { snapshot, type Snapshot } from "../live";
 import { readFile } from "node:fs/promises";
 import {
@@ -16,6 +23,9 @@ import {
 const DEADLINE = 5000;
 const CODES: Record<string, number> = {
   VALIDATION_ERROR: 400,
+  SEARCH_UNAVAILABLE: 503,
+  SEARCH_INDEX_REBUILDING: 503,
+  SEARCH_CAPACITY_EXCEEDED: 503,
   LIVE_CURSOR_INVALID: 409,
   LIVE_CURSOR_AHEAD: 409,
   LIVE_CAPACITY_EXCEEDED: 503,
@@ -33,9 +43,14 @@ const FIELDS = new Set([
   "query",
   "after",
   "Last-Event-ID",
+  "level",
+  "instanceId",
+  "keyword",
 ]);
 const FIELD_CODES = new Set([
   "REQUIRED",
+  "INVALID_ENUM",
+  "TOO_LONG",
   "INVALID_FORMAT",
   "INVALID_UTC_TIMESTAMP",
   "OUT_OF_RANGE",
@@ -123,6 +138,7 @@ async function query<T>(
   valid: (value: unknown) => value is T,
   limit: number,
   signal?: AbortSignal,
+  deadlineMs = DEADLINE,
 ): Promise<Result<T>> {
   let base: URL;
   try {
@@ -130,7 +146,7 @@ async function query<T>(
   } catch {
     return failure(503, "API_CONFIGURATION_ERROR");
   }
-  const deadline = AbortSignal.timeout(DEADLINE);
+  const deadline = AbortSignal.timeout(deadlineMs);
   try {
     const response = await fetch(new URL(path, base), {
       cache: "no-store",
@@ -203,5 +219,15 @@ export function loadSnapshot(signal?: AbortSignal) {
     snapshot,
     8 * 1024 * 1024,
     signal,
+  );
+}
+
+export function loadSearch(queryValue: SearchQuery, signal?: AbortSignal) {
+  return query<SearchResult>(
+    `/api/v1/logs/search?${parameters(queryValue)}`,
+    (value): value is SearchResult => searchResult(value, queryValue),
+    8 * 1024 * 1024,
+    signal,
+    SEARCH_SERVER_TIMEOUT,
   );
 }

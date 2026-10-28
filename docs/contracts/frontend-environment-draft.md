@@ -89,3 +89,7 @@ API 오류의 HTTP 상태·code·errors 및 유효한 Retry-After는 보존한�
 - [Server/Client Components](https://nextjs.org/docs/app/getting-started/server-and-client-components), [동적 요청 connection](https://nextjs.org/docs/app/api-reference/functions/connection), [fetch 캐시](https://nextjs.org/docs/app/api-reference/functions/fetch), [standalone 출력](https://nextjs.org/docs/app/api-reference/config/next-config-js/output), [조회 중계 패턴](https://nextjs.org/docs/app/guides/backend-for-frontend)
 
 2026-10-27: 사용자 요청으로 SSR 방향을 확정하고 개발 환경의 구체적 추천을 처음 기록했다. 기존 연동 문서의 환경 후보 설명을 대체하는 후속 초안이며 기존 파일과 근거는 보존한다. 목적은 구현 전에 버전 재현성과 서버·프론트 실행 경계를 분명히 하는 것이다. 공식 자료 확인과 문서 작성만 수행했으며 설치·호환성·SSR·빌드·통합 검증 결과는 없다.
+
+## 2026-10-28 검색 보기 추가
+
+실시간 보기와 분리된 명시적 검색·기간/서버/레벨 필터를 추가한다. 이전 초기 구현의 검색 미제공 설명은 당시 범위로 보존하며, 현재 동작·오류 보존·검색 전용 시간 제한과 후속 범위는 [로그 검색 보기](../frontend-search-view.md)를 따른다. 검색은 백엔드 ES API, 상세와 실시간은 기존 API를 사용한다. 입력마다 호출하지 않고 조회 또는 Enter로 적용해 요청과 화면 변경을 제어한다.
