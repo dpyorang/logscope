@@ -603,4 +603,59 @@ class LogApiTests {
           .isEqualTo(future.get("eventId"));
     }
   }
+
+  @Test
+  void snapshotIncludesLogCommittedWhileWaitingForDatabaseConnection() throws Exception {
+    long previous =
+        jdbc.queryForObject("SELECT last_sequence FROM log_stream_state WHERE id=1", Long.class);
+    var pool = (com.zaxxer.hikari.HikariDataSource) jdbc.getDataSource();
+    var held = new ArrayList<java.sql.Connection>();
+    CompletableFuture<HttpResponse<String>> snapshot;
+    String id = UUID.randomUUID().toString();
+    try {
+      for (int i = 0; i < pool.getMaximumPoolSize(); i++) held.add(pool.getConnection());
+      snapshot =
+          CompletableFuture.supplyAsync(
+              () -> {
+                try {
+                  return send("GET", "/live", null, "");
+                } catch (Exception error) {
+                  throw new RuntimeException(error);
+                }
+              });
+      long end = System.nanoTime() + java.time.Duration.ofSeconds(5).toNanos();
+      while (pool.getHikariPoolMXBean().getThreadsAwaitingConnection() == 0
+          && System.nanoTime() < end) Thread.sleep(5);
+      assertThat(pool.getHikariPoolMXBean().getThreadsAwaitingConnection()).isGreaterThan(0);
+      Thread.sleep(20);
+      var connection = held.getFirst();
+      connection.setAutoCommit(false);
+      try (var insert =
+          connection.prepareStatement(
+              "INSERT INTO log_events (event_id,occurred_at,service_name,instance_id,level,message,stream_sequence) VALUES (?,?,'sample-was','was-1','INFO','Synthetic connection wait',?)")) {
+        insert.setString(1, id);
+        insert.setObject(
+            2,
+            java.time.LocalDateTime.ofInstant(
+                java.time.Instant.now()
+                    .minusMillis(1)
+                    .truncatedTo(java.time.temporal.ChronoUnit.MILLIS),
+                java.time.ZoneOffset.UTC));
+        insert.setLong(3, previous + 1);
+        insert.executeUpdate();
+      }
+      try (var update =
+          connection.prepareStatement("UPDATE log_stream_state SET last_sequence=? WHERE id=1")) {
+        update.setLong(1, previous + 1);
+        update.executeUpdate();
+      }
+      connection.commit();
+    } finally {
+      for (var connection : held) connection.close();
+    }
+    var result = tree(snapshot.get(5, java.util.concurrent.TimeUnit.SECONDS));
+    assertThat(result.get("items").size()).isEqualTo(1);
+    assertThat(result.get("items").get(0).get("eventId").asString()).isEqualTo(id);
+    assertThat(result.get("cursor").asString()).endsWith(":" + (previous + 1));
+  }
 }

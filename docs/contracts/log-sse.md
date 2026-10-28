@@ -4,7 +4,7 @@
 
 ## API와 화면 책임
 
-- `GET /api/v1/logs/live`: query 없음. `{items: Summary[], cursor: string, from: string, to: string, truncated: boolean}`. from/to는 서버가 계산한 최근 24시간 UTC 밀리초, 시작 포함·끝 제외다. 발생시각/eventId 내림차순 최신 50건이며 51건 이상이면 truncated=true다. 이 snapshot은 최신 50건 보기이며 전체 기록을 모두 받은 것으로 표현하지 않는다. 기존 목록의 501 동작은 변경하지 않는다.
+- `GET /api/v1/logs/live`: query 없음. `{items: Summary[], cursor: string, from: string, to: string, truncated: boolean}`. from/to는 서버가 계산한 최근 24시간 UTC 밀리초, 시작 포함·끝 제외다. 종료 경계는 DB의 첫 consistent read로 cursor를 읽은 뒤 현재 밀리초의 다음 경계로 정한다. DB 연결 대기 중 저장된 로그와 같은 밀리초 로그가 cursor에만 반영되고 목록에서 빠지는 것을 방지한다. 발생시각/eventId 내림차순 최신 50건이며 51건 이상이면 truncated=true다. 이 snapshot은 최신 50건 보기이며 전체 기록을 모두 받은 것으로 표현하지 않는다. 기존 목록의 501 동작은 변경하지 않는다.
 - snapshot의 cursor와 items는 같은 MySQL repeatable-read view다. snapshot 이후 stream 연결 전에 저장된 로그도 cursor 이후 replay에 포함된다. 최초 SSR은 이 API를 직접 조회하고 응답을 클라이언트로 인계한다. 브라우저에서 같은 snapshot을 다시 요청하지 않는다.
 - `GET /api/v1/logs/stream?after=<cursor>`: after 필수, 단일 값. Last-Event-ID가 있으면 after보다 우선한다. 두 값 모두 형식 검증한다. 그 밖의 query와 중복 인자는 400 VALIDATION_ERROR다. cursor는 서버가 발급한 불투명 문자열로 취급한다.
 - 성공은 `text/event-stream`, `Cache-Control: no-store, no-transform`, `X-Accel-Buffering: no`다. `ready` 이벤트 data는 `{cursor}`이며 연결 시작점을 뜻한다. 클라이언트는 ready로 보관 cursor를 앞당기지 않는다. `log` 이벤트 id는 cursor, data는 `{cursor,item: Summary}`다. JSON은 UTF-8이며 원문을 HTML로 해석하지 않는다. 주석 heartbeat를 최대 약 15초 간격으로 전송하고 `retry:3000`을 안내한다. 서버 연결은 약 55~60초 뒤 종료해 자원을 재정리하고 같은 cursor부터 재연결한다.

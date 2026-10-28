@@ -1,8 +1,6 @@
 package com.logscope.log;
 
 import jakarta.servlet.http.HttpServletRequest;
-import java.time.Instant;
-import java.time.temporal.ChronoUnit;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.MultiValueMap;
@@ -27,9 +25,7 @@ class LogLiveController {
   ResponseEntity<LogStore.LiveSnapshot> snapshot(
       @RequestParam MultiValueMap<String, String> params) {
     if (!params.isEmpty()) throw new LogApiException("query", "UNKNOWN_FIELD");
-    return ResponseEntity.ok()
-        .header("Cache-Control", "no-store")
-        .body(store.snapshot(Instant.now().truncatedTo(ChronoUnit.MILLIS)));
+    return ResponseEntity.ok().header("Cache-Control", "no-store").body(store.snapshot());
   }
 
   @GetMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)

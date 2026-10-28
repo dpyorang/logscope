@@ -144,6 +144,17 @@ class LogStreamTests {
     service.shutdown();
   }
 
+  @Test
+  void exclusiveSnapshotEndIncludesCurrentMillisecondAcrossSecondBoundary() {
+    var occurrence = Instant.parse("2026-10-28T00:00:00.999Z");
+    var end = LogStore.snapshotEnd(occurrence.plusNanos(123456));
+    assertThat(occurrence).isBefore(end);
+    assertThat(end).isEqualTo(Instant.parse("2026-10-28T00:00:01.000Z"));
+    assertThat(LogStore.snapshotEnd(occurrence)).isEqualTo(end);
+    assertThat(java.time.Duration.between(end.minus(java.time.Duration.ofHours(24)), end))
+        .isEqualTo(java.time.Duration.ofHours(24));
+  }
+
   private void awaitClosed(LogStreamService service) throws Exception {
     long end = System.nanoTime() + java.time.Duration.ofSeconds(3).toNanos();
     while (service.activeConnections() != 0 && System.nanoTime() < end) Thread.sleep(10);

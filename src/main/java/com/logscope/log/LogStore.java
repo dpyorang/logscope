@@ -74,11 +74,13 @@ class LogStore {
         (rs, row) -> new LogStreamCursor(rs.getString(1), rs.getLong(2)));
   }
 
-  LiveSnapshot snapshot(Instant now) {
+  LiveSnapshot snapshot() {
     return transactions.execute(
         status -> {
           // First consistent read establishes one repeatable-read view for both head and rows.
           var cursor = head();
+          // Determine the time window after the read view, including the current millisecond.
+          var now = snapshotEnd(Instant.now());
           var from = now.minus(java.time.Duration.ofHours(24));
           var rows = list(from, now, 50);
           return new LiveSnapshot(
@@ -94,6 +96,10 @@ class LogStore {
                   .format(now),
               rows.size() > 50);
         });
+  }
+
+  static Instant snapshotEnd(Instant now) {
+    return now.truncatedTo(java.time.temporal.ChronoUnit.MILLIS).plusMillis(1);
   }
 
   List<StreamRow> after(LogStreamCursor cursor) {
