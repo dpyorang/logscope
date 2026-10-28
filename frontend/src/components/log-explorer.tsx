@@ -14,6 +14,7 @@ import {
   displayTime,
   failure,
   guidance,
+  recentRange,
   type Detail,
   type Range,
   type Result,
@@ -21,6 +22,15 @@ import {
 
 import { LiveStore, read } from "@/lib/live-store";
 import type { Snapshot } from "@/lib/live";
+import { SearchStore } from "@/lib/search-store";
+import {
+  draft,
+  fromDraft,
+  fieldErrors,
+  searchGuidance,
+  type SearchQuery,
+} from "@/lib/search";
+import { SearchForm } from "./search-form";
 
 type Selection = { id: string; result: Result<Detail> | null };
 export function LogExplorer({
@@ -35,6 +45,17 @@ export function LogExplorer({
   const [store] = useState(
     () => new LiveStore(initialResult, initialRange, initialSuccessAt),
   );
+  const [search] = useState(() => new SearchStore());
+  const [mode, setMode] = useState<"live" | "search">("live");
+  const [input, setInput] = useState(() => draft(initialRange));
+  const [validation, setValidation] = useState<Record<string, string>>({});
+  const enteredSearch = useRef(false);
+  const searched = useSyncExternalStore(
+    search.subscribe,
+    search.getSnapshot,
+    search.getServerSnapshot,
+  );
+  const isSearch = mode === "search";
   const reading = useRef<{
     element: HTMLElement | null;
     top: number;
@@ -82,11 +103,28 @@ export function LogExplorer({
     store.getSnapshot,
     store.getServerSnapshot,
   );
-  const { result, range, successAt, busy, refreshError: listError } = state;
+  const result = isSearch
+    ? (searched.result ?? failure(0, "SEARCH_NOT_STARTED"))
+    : state.result;
+  const range = isSearch
+    ? (searched.applied ?? searched.failed ?? initialRange)
+    : state.range;
+  const successAt = isSearch ? searched.successAt : state.successAt;
+  const busy = isSearch ? searched.busy : state.busy;
+  const listError = isSearch ? searched.error : state.refreshError;
+  const inputErrors = {
+    ...(isSearch && searched.error ? fieldErrors(searched.error) : {}),
+    ...validation,
+  };
   useEffect(() => {
-    store.start();
-    return () => store.stop();
-  }, [store]);
+    if (mode === "live") {
+      if (enteredSearch.current) store.startFresh();
+      else store.start();
+      return () => store.stop();
+    }
+    search.start();
+    return () => search.stop();
+  }, [mode, store, search]);
   useLayoutEffect(() => {
     const previous = reading.current;
     if (!previous) return;
@@ -120,6 +158,50 @@ export function LogExplorer({
     [],
   );
 
+  function changeMode(next: "live" | "search") {
+    if (next === mode) return;
+    detailController.current?.abort();
+    detailVersion.current++;
+    setSelection(null);
+    setCopyState("");
+    setValidation({});
+    if (next === "search") {
+      if (!enteredSearch.current) setInput(draft(recentRange()));
+      enteredSearch.current = true;
+      store.stop();
+    } else search.stop();
+    reading.current = null;
+    setMode(next);
+  }
+  async function querySearch(query?: SearchQuery) {
+    if (busy) return;
+    const checked = query
+      ? { ok: true as const, data: query }
+      : fromDraft(input);
+    if (!checked.ok) {
+      const errors = fieldErrors(checked.problem);
+      setValidation(errors);
+      document.getElementById(`search-${Object.keys(errors)[0]}`)?.focus();
+      return;
+    }
+    setValidation({});
+    detailController.current?.abort();
+    detailVersion.current++;
+    setSelection((previous) =>
+      previous && !previous.result
+        ? {
+            id: previous.id,
+            result: failure(499, "DETAIL_REQUEST_INTERRUPTED"),
+          }
+        : previous,
+    );
+    if (await search.query(checked.data)) {
+      const restore = panel.current?.contains(document.activeElement);
+      setSelection(null);
+      setCopyState("");
+      if (restore) requestAnimationFrame(() => listHeading.current?.focus());
+    }
+  }
   async function queryList() {
     detailController.current?.abort();
     detailVersion.current += 1;
@@ -224,83 +306,168 @@ export function LogExplorer({
                   발생한 서버를 확인하고 로그의 상세 내용을 살펴보세요.
                 </p>
               </div>
+              {!isSearch && (
+                <button
+                  className="primary-button"
+                  disabled={busy}
+                  onClick={() => queryList()}
+                >
+                  {busy ? "조회 중…" : "새로고침"}
+                </button>
+              )}
+            </div>
+            <div className="view-switch" role="group" aria-label="보기 방식">
               <button
-                className="primary-button"
-                disabled={busy}
-                onClick={() => queryList()}
+                aria-pressed={!isSearch}
+                onClick={() => changeMode("live")}
               >
-                {busy ? "조회 중…" : "새로고침"}
+                실시간 보기
+              </button>
+              <button
+                aria-pressed={isSearch}
+                onClick={() => changeMode("search")}
+              >
+                검색 보기
               </button>
             </div>
+            {isSearch && (
+              <SearchForm
+                value={input}
+                onChange={(value) => {
+                  setInput(value);
+                  setValidation({});
+                }}
+                onSubmit={() => void querySearch()}
+                onRecent={() => {
+                  const recent = draft(recentRange());
+                  setInput({ ...input, from: recent.from, to: recent.to });
+                }}
+                busy={busy}
+                errors={inputErrors}
+              />
+            )}
             <div className="query-info">
               <div>
-                <strong>최근 24시간 · 최신순 · 최대 50건</strong>
-                <p>
-                  조회 범위: <time>{displayTime(range.from)}</time> ~{" "}
-                  <time>{displayTime(range.to)}</time>
-                </p>
-                <p>시작 시각 포함 · 종료 시각 제외</p>
+                <strong>
+                  {isSearch
+                    ? "검색 결과 · 최신순 · 최대 50건"
+                    : "최근 24시간 · 최신순 · 최대 50건"}
+                </strong>
+                {!isSearch || searched.applied || searched.failed ? (
+                  <>
+                    <p>
+                      조회 범위: <time>{displayTime(range.from)}</time> ~{" "}
+                      <time>{displayTime(range.to)}</time>
+                    </p>
+                    <p>시작 시각 포함 · 종료 시각 제외</p>
+                  </>
+                ) : (
+                  <p>검색을 실행하면 적용 조건과 조회 시간이 표시됩니다.</p>
+                )}
+                {isSearch && searched.applied && (
+                  <p className="applied-conditions">
+                    적용 조건: 서버 {searched.applied.instanceId ?? "전체"} ·
+                    레벨 {searched.applied.level ?? "전체"} · 메시지{" "}
+                    {searched.applied.keyword || "전체"}
+                  </p>
+                )}
               </div>
               <p>
                 {successAt ? (
                   <>
-                    마지막 목록 조회 성공
+                    {isSearch ? "마지막 검색 성공" : "마지막 목록 조회 성공"}
                     <br />
                     <time>{displayTime(successAt)}</time>
                   </>
+                ) : isSearch ? (
+                  "아직 성공한 검색이 없습니다"
                 ) : (
                   "아직 성공한 조회가 없습니다"
                 )}
               </p>
             </div>
-            <div className="live-controls">
-              <div className="live-state" role="status" aria-live="polite">
-                <strong>
-                  {
+            {!isSearch && (
+              <div className="live-controls">
+                <div className="live-state" role="status" aria-live="polite">
+                  <strong>
                     {
-                      waiting: "실시간 연결 대기",
-                      connecting: "실시간 연결 중",
-                      live: "실시간 연결됨",
-                      reconnecting: "실시간 재연결 중",
-                      error: "실시간 연결 실패",
-                      "needs-refresh": "새 목록 조회 필요",
-                      paused: "실시간 일시정지",
-                    }[state.phase]
-                  }
-                </strong>
-                <p>
-                  {state.pausedAt
-                    ? `정지 시각: ${displayTime(state.pausedAt)}`
-                    : state.phase === "needs-refresh"
-                      ? "기존 결과를 보존했습니다. 이어받기 요청을 계속할 수 없어 새로고침으로 최신 목록을 조회해야 합니다."
-                      : state.phase === "error"
-                        ? "기존 결과를 보존하고 다시 연결합니다. 연결 중단이 로그 저장 중단이나 유실을 뜻하지는 않습니다."
-                        : state.phase === "waiting"
-                          ? "목록 조회에 성공하면 실시간 연결을 시작합니다."
-                          : state.phase === "connecting"
-                            ? "마지막 처리 위치에서 실시간 연결을 시작하고 있습니다."
-                            : state.phase === "reconnecting"
-                              ? "연결을 갱신하고 마지막 처리 위치부터 이어받습니다."
-                              : "새 로그가 없어도 연결은 유지됩니다. 최근 24시간 범위는 자동으로 이동합니다."}
-                </p>
-                <p>
-                  마지막 정상 실시간 로그 수신:{" "}
-                  {state.liveAt
-                    ? displayTime(state.liveAt)
-                    : "아직 수신한 로그가 없습니다"}
-                </p>
-                <p>
-                  실시간으로 추가된 로그 {state.newCount}건 · 목록은 최신
-                  50건까지 표시
-                </p>
+                      {
+                        waiting: "실시간 연결 대기",
+                        connecting: "실시간 연결 중",
+                        live: "실시간 연결됨",
+                        reconnecting: "실시간 재연결 중",
+                        error: "실시간 연결 실패",
+                        "needs-refresh": "새 목록 조회 필요",
+                        paused: "실시간 일시정지",
+                      }[state.phase]
+                    }
+                  </strong>
+                  <p>
+                    {state.pausedAt
+                      ? `정지 시각: ${displayTime(state.pausedAt)}`
+                      : state.phase === "needs-refresh"
+                        ? "기존 결과를 보존했습니다. 이어받기 요청을 계속할 수 없어 새로고침으로 최신 목록을 조회해야 합니다."
+                        : state.phase === "error"
+                          ? "기존 결과를 보존하고 다시 연결합니다. 연결 중단이 로그 저장 중단이나 유실을 뜻하지는 않습니다."
+                          : state.phase === "waiting"
+                            ? "목록 조회에 성공하면 실시간 연결을 시작합니다."
+                            : state.phase === "connecting"
+                              ? "마지막 처리 위치에서 실시간 연결을 시작하고 있습니다."
+                              : state.phase === "reconnecting"
+                                ? "연결을 갱신하고 마지막 처리 위치부터 이어받습니다."
+                                : "새 로그가 없어도 연결은 유지됩니다. 최근 24시간 범위는 자동으로 이동합니다."}
+                  </p>
+                  <p>
+                    마지막 정상 실시간 로그 수신:{" "}
+                    {state.liveAt
+                      ? displayTime(state.liveAt)
+                      : "아직 수신한 로그가 없습니다"}
+                  </p>
+                  <p>
+                    실시간으로 추가된 로그 {state.newCount}건 · 목록은 최신
+                    50건까지 표시
+                  </p>
+                </div>
+                <button
+                  disabled={busy}
+                  onClick={state.paused ? store.resume : store.pause}
+                >
+                  {state.paused ? "실시간 재개" : "일시정지"}
+                </button>
               </div>
-              <button
-                disabled={busy}
-                onClick={state.paused ? store.resume : store.pause}
-              >
-                {state.paused ? "실시간 재개" : "일시정지"}
-              </button>
-            </div>
+            )}
+            {isSearch && (
+              <div className="search-status" role="status" aria-live="polite">
+                <p>
+                  검색 결과는 조회 시점의 조건으로 고정됩니다. 자동 갱신하지
+                  않으며, 최신 로그는 실시간 보기에서 확인할 수 있습니다.
+                </p>
+                {searched.result?.ok && (
+                  <>
+                    {searched.result.data.synchronization.indexingPending ? (
+                      <p>
+                        검색 반영 대기 중입니다. 전체 색인 대기{" "}
+                        {searched.result.data.synchronization.pendingCount}건 ·
+                        재시도{" "}
+                        {searched.result.data.synchronization.retryingCount}건.
+                        이 수는 현재 검색의 누락 건수가 아닙니다.
+                      </p>
+                    ) : (
+                      <p>
+                        조회 시점에 관측한 색인 대기 작업이 없습니다. 이후 검색
+                        결과는 달라질 수 있습니다.
+                      </p>
+                    )}
+                    <button
+                      aria-disabled={busy}
+                      onClick={() => void querySearch(searched.applied!)}
+                    >
+                      적용 조건으로 다시 조회
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
             {result.ok && result.data.truncated && (
               <p className="limit-notice">
                 최신 50건만 표시합니다. 화면에서 빠진 로그를 포함한 전체 이력
@@ -309,14 +476,33 @@ export function LogExplorer({
             )}
             <p className="query-status" role="status" aria-live="polite">
               {busy
-                ? "목록을 갱신하고 있습니다. 기존 결과는 이전 조회 결과입니다."
+                ? isSearch
+                  ? "검색 중입니다. 이전 결과가 있다면 이전 조건의 결과입니다."
+                  : "목록을 갱신하고 있습니다. 기존 결과는 이전 조회 결과입니다."
                 : result.ok
                   ? `현재 목록 ${result.data.items.length}건`
-                  : "목록 조회 실패"}
+                  : isSearch
+                    ? searched.error
+                      ? "검색 실패"
+                      : "검색 조건을 설정하고 조회해 주세요."
+                    : "목록 조회 실패"}
             </p>
             {listError && (
               <div className="error-notice" role="alert">
-                <strong>{guidance(listError.code)}</strong>
+                <strong>
+                  {isSearch
+                    ? searchGuidance(listError.code)
+                    : guidance(listError.code)}
+                </strong>
+                {isSearch && searched.failed && (
+                  <p>
+                    실패한 검색: {displayTime(searched.failed.from)} ~{" "}
+                    {displayTime(searched.failed.to)} · 서버{" "}
+                    {searched.failed.instanceId ?? "전체"} · 레벨{" "}
+                    {searched.failed.level ?? "전체"} · 메시지{" "}
+                    {searched.failed.keyword || "전체"}
+                  </p>
+                )}
                 {result.ok && <p>이전 조회 결과를 표시하고 있습니다.</p>}
                 {listError.retryAfter && (
                   <p>
@@ -324,8 +510,15 @@ export function LogExplorer({
                     주세요.
                   </p>
                 )}
-                <button disabled={busy} onClick={() => queryList()}>
-                  목록 다시 조회
+                <button
+                  disabled={busy}
+                  onClick={() =>
+                    isSearch
+                      ? void querySearch(searched.failed!)
+                      : void queryList()
+                  }
+                >
+                  {isSearch ? "같은 조건으로 다시 시도" : "목록 다시 조회"}
                 </button>
               </div>
             )}
@@ -340,10 +533,15 @@ export function LogExplorer({
                 </h2>
                 {result.ok && result.data.items.length === 0 && (
                   <div className="empty-state">
-                    <h3>조회 범위에 로그가 없습니다</h3>
+                    <h3>
+                      {isSearch
+                        ? "현재 검색 결과가 없습니다"
+                        : "조회 범위에 로그가 없습니다"}
+                    </h3>
                     <p>
-                      최근 24시간에 발생한 로그만 표시합니다. 실시간 연결 중이면
-                      새 로그를 기다립니다.
+                      {isSearch
+                        ? "조건을 바꾸거나 색인 반영 후 같은 조건으로 다시 조회할 수 있습니다."
+                        : "최근 24시간에 발생한 로그만 표시합니다. 실시간 연결 중이면 새 로그를 기다립니다."}
                     </p>
                   </div>
                 )}
@@ -426,7 +624,9 @@ export function LogExplorer({
                 )}
                 {!result.ok && (
                   <p className="empty-state">
-                    조회에 성공하면 로그가 여기에 표시됩니다.
+                    {isSearch
+                      ? "조건을 설정하고 조회하면 검색 결과가 여기에 표시됩니다."
+                      : "조회에 성공하면 로그가 여기에 표시됩니다."}
                   </p>
                 )}
               </section>
@@ -511,7 +711,8 @@ export function LogExplorer({
               </section>
             </div>
             <p className="footnote">
-              검색·필터·페이지 탐색은 다음 단계에서 제공됩니다.
+              페이지 탐색은 다음 단계에서 제공됩니다. 검색은 메시지를 단어로
+              분석하며 예외 원문은 상세에서 확인합니다.
             </p>
           </main>
           <footer>

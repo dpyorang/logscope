@@ -58,3 +58,7 @@ Next.js·Spring Boot의 실제 이미지·포트·health·네트워크, 조회 �
 ## 2026-10-28 Elasticsearch 검색 projection
 
 사용자 요청으로 Redis 없이 MySQL 원본과 Elasticsearch 검색 색인을 분리한다. 원본·SSE 순서·색인 outbox를 같은 트랜잭션으로 저장하고 작업자가 검색 가능 반영 후 대기 항목을 제거한다. ES 장애에도 수집과 SSE를 유지하며 검색은503으로 구분한다. 기존 정적 목록과 SSE를 바꾸지 않는 `/api/v1/logs/search`의 한국어 분석·필터·최신 결과/대기 상태는 [검색 명세](contracts/log-search.md), 원리와 선택 이유는 [결정 기록](decisions/elasticsearch-log-search.md)을 따른다. 프론트 검색 UI는 별도 작업이다.
+
+## 2026-10-28 검색 보기 추가
+
+실시간 보기와 분리된 명시적 검색·기간/서버/레벨 필터를 추가한다. 이전 초기 구현의 검색 미제공 설명은 당시 범위로 보존하며, 현재 동작·오류 보존·검색 전용 시간 제한과 후속 범위는 [로그 검색 보기](frontend-search-view.md)를 따른다. 검색은 백엔드 ES API, 상세와 실시간은 기존 API를 사용한다. 입력마다 호출하지 않고 조회 또는 Enter로 적용해 요청과 화면 변경을 제어한다.

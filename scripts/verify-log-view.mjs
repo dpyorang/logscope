@@ -14,17 +14,20 @@ async function ready(url) { const end=Date.now()+120000; while(Date.now()<end) {
 try {
  const password=randomUUID(); const rootPassword=randomUUID();
  await writeFile(join(folder,"db.env"),`MYSQL_DATABASE=logscope\nMYSQL_USER=logscope\nMYSQL_PASSWORD=${password}\nMYSQL_ROOT_PASSWORD=${rootPassword}\n`,{mode:0o600});
- await writeFile(join(folder,"app.env"),`SPRING_PROFILES_ACTIVE=local\nDB_URL=jdbc:mysql://db:3306/logscope?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true\nDB_USERNAME=logscope\nDB_PASSWORD=${password}\n`,{mode:0o600});
+ await writeFile(join(folder,"app.env"),`SPRING_PROFILES_ACTIVE=local\nDB_URL=jdbc:mysql://db:3306/logscope?connectionTimeZone=UTC&forceConnectionTimeZoneToSession=true\nDB_USERNAME=logscope\nDB_PASSWORD=${password}\nSEARCH_ENABLED=true\nSEARCH_URL=http://search:9200\n`,{mode:0o600});
  docker(["network","create",prefix]); networkCreated=true;
  const db=start("db",["--network-alias","db","--env-file",join(folder,"db.env"),"--health-cmd",'MYSQL_PWD="$MYSQL_PASSWORD" mysql -h 127.0.0.1 -u "$MYSQL_USER" -D logscope -e "SELECT 1"',"--health-interval","2s","--health-timeout","2s","--health-retries","60","mysql:8.4.13"]);
  const end=Date.now()+120000; while(docker(["inspect","--format","{{.State.Health.Status}}",db])!=="healthy") { if(Date.now()>end) throw new Error("Isolated MySQL readiness timed out"); await new Promise(resolve=>setTimeout(resolve,1000)); }
+ const search=start("engine",["--network-alias","search","--memory","2g","--env","discovery.type=single-node","--env","xpack.security.enabled=false","--env","action.auto_create_index=false","--env","ES_JAVA_OPTS=-Xms512m -Xmx512m","--publish","127.0.0.1::9200",process.env.LOGSCOPE_SEARCH_VERIFY_IMAGE ?? "logscope-search:verify"]);
+ const searchUrl=port(search,9200); const searchEnd=Date.now()+120000;
+ while(true) { try { const r=await fetch(`${searchUrl}/_cluster/health`,{signal:AbortSignal.timeout(2000)}); const body=await r.json(); if(r.ok && ["yellow","green"].includes(body.status)) break; } catch {} if(Date.now()>searchEnd) throw new Error("Isolated search readiness timed out"); await new Promise(resolve=>setTimeout(resolve,1000)); }
  const app=start("app",["--network-alias","app","--env-file",join(folder,"app.env"),"--publish","127.0.0.1::8080",(process.env.LOGSCOPE_VERIFY_IMAGE ?? "logscope:verify")]);
  const api=port(app,8080); await ready(`${api}/actuator/health/readiness`);
  const front=start("frontend",["--env","LOGSCOPE_API_BASE_URL=http://app:8080","--publish","127.0.0.1::3000",(process.env.LOGSCOPE_FRONTEND_VERIFY_IMAGE ?? "logscope-frontend:verify")]);
  const ui=port(front,3000); await ready(`${ui}/health/live`);
- const code=await new Promise((resolve,reject)=>{ const child=spawn("npm",["exec","--no","--","playwright","test","--config","playwright.integration.config.ts"],{cwd:"frontend",env:{...process.env,LOGSCOPE_TEST_UI_URL:ui,LOGSCOPE_TEST_API_URL:api},stdio:"inherit"}); child.on("error",reject); child.on("exit",resolve); });
+ const code=await new Promise((resolve,reject)=>{ const child=spawn("npm",["exec","--no","--","playwright","test","--config","playwright.integration.config.ts"],{cwd:"frontend",env:{...process.env,LOGSCOPE_TEST_UI_URL:ui,LOGSCOPE_TEST_API_URL:api,LOGSCOPE_TEST_SEARCH_CONTAINER:search},stdio:"inherit"}); child.on("error",reject); child.on("exit",resolve); });
  if(code!==0) throw new Error("Persisted log browser integration failed");
- console.log("Isolated MySQL → Spring Boot → Next.js SSR/detail integration passed.");
+ console.log("Isolated MySQL → Spring Boot → Next.js SSR/detail/search integration passed.");
 } finally {
  for(const name of containers.reverse()) { try { docker(["rm","--force","--volumes",name]); } catch {} }
  if(networkCreated) { try { docker(["network","rm",prefix]); } catch {} }
