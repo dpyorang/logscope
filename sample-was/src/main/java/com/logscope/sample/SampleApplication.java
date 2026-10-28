@@ -2,11 +2,11 @@ package com.logscope.sample;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.scheduling.annotation.EnableScheduling;
 
+/** 독립 샘플 WAS의 실행 진입점이다. */
 @SpringBootApplication
-@EnableScheduling
 public class SampleApplication {
+  /** 독립 샘플 WAS를 시작한다. */
   public static void main(String[] args) {
     SpringApplication.run(SampleApplication.class, args);
   }
