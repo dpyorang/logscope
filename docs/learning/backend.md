@@ -325,7 +325,7 @@ DATETIME(3)·UTC LocalDateTime 변환으로 JVM 기본 시간대에 의존하지
 
 - [이전 설계·학습 기록](#backend-foundation), [공통 기록 형식](../learning-record-format.md).
 - [API 명세와 현재 구현 범위](../contracts/log-api-draft.md), [기능별 진행](../feature-development-workflow.md).
-- [컨트롤러](../../src/main/java/com/logscope/log/LogController.java), [저장소](../../src/main/java/com/logscope/log/LogStore.java), [V2 migration](../../src/main/resources/db/migration/V2__create_log_events.sql).
+- [컨트롤러](../../src/main/java/com/logscope/log/controller/LogController.java), [저장소](../../src/main/java/com/logscope/log/repository/LogRepository.java), [V2 migration](../../src/main/resources/db/migration/V2__create_log_events.sql).
 - [HTTP·MySQL 테스트](../../src/test/java/com/logscope/LogApiTests.java).
 
 <a id="backend-loginput-unit-20261027"></a>
@@ -369,7 +369,7 @@ LogInputTests는 Spring 컨텍스트·HTTP 서버·MySQL·Docker 없이 LogInput
 
 ### 6. 관련 문서와 코드
 
-- [LogInput 단위 테스트](../../src/test/java/com/logscope/log/LogInputTests.java), [입력 검증](../../src/main/java/com/logscope/log/LogInput.java), [오류 정의](../../src/main/java/com/logscope/log/LogApiException.java).
+- [LogInput 단위 테스트](../../src/test/java/com/logscope/log/validation/LogInputTests.java), [입력 검증](../../src/main/java/com/logscope/log/validation/LogInput.java), [오류 정의](../../src/main/java/com/logscope/log/exception/LogApiException.java).
 - [기존 HTTP·MySQL 테스트](../../src/test/java/com/logscope/LogApiTests.java), [API 명세](../contracts/log-api-draft.md), [작업 규칙](../../AGENTS.md).
 - [이전 저장·조회 학습](#backend-ingest-read-20261027). 기존 설계 설명은 당시 기록이며 이 항목의 테스트 구현과 구분한다.
 
@@ -413,10 +413,10 @@ Logback은 애플리케이션의 로그를 파일에 남기고 Vector는 그 파
 
 - [샘플 파이프라인과 실행·한계](../sample-log-pipeline.md)
 - [API 명세](../contracts/log-api-draft.md), [아키텍처](../architecture.md)
-- [샘플 생성 코드](../../sample-was/src/main/java/com/logscope/sample/EventGenerator.java), [JSON encoder](../../sample-was/src/main/java/com/logscope/sample/JsonLogEncoder.java)
+- [샘플 생성 코드](../../sample-was/src/main/java/com/logscope/sample/service/EventGenerator.java), [JSON encoder](../../sample-was/src/main/java/com/logscope/sample/logging/JsonLogEncoder.java)
 - [Vector 디스크 버퍼 공식 이슈](https://github.com/vectordotdev/vector/issues/26523)
-- [Vector 설정](../../collectors/vector.yaml), [배치 API](../../src/main/java/com/logscope/log/LogController.java)
-- [배치 단위 테스트](../../src/test/java/com/logscope/log/BatchTests.java), [샘플 단위 테스트](../../sample-was/src/test/java/com/logscope/sample/SampleTests.java), [전체 파이프라인 검증](../../scripts/verify-sample-pipeline.mjs)
+- [Vector 설정](../../collectors/vector.yaml), [배치 API](../../src/main/java/com/logscope/log/controller/LogController.java)
+- [배치 단위 테스트](../../src/test/java/com/logscope/log/service/BatchTests.java), [샘플 단위 테스트](../../sample-was/src/test/java/com/logscope/sample/service/SampleTests.java), [전체 파이프라인 검증](../../scripts/verify-sample-pipeline.mjs)
 
 <a id="backend-isolated-event-diagnostics-20261027"></a>
 
@@ -540,9 +540,9 @@ snapshot은 여러 값을 같은 시점의 DB 모습으로 읽는 것이다. cur
 ### 6. 관련 문서와 코드
 
 - [SSE 명세](../contracts/log-sse.md), [SSE 선택과 저장 순서 결정](../decisions/sse-log-delivery.md), [공통 아키텍처](../architecture.md)
-- [최초 snapshot·연결 API](../../src/main/java/com/logscope/log/LogLiveController.java), [저장과 snapshot](../../src/main/java/com/logscope/log/LogStore.java), [전송·연결 수명](../../src/main/java/com/logscope/log/LogStreamService.java)
-- [신호 경쟁 제어](../../src/main/java/com/logscope/log/LogStreamSignal.java), [cursor 검증](../../src/main/java/com/logscope/log/LogStreamCursor.java), [V3 migration](../../src/main/resources/db/migration/V3__log_stream_sequence.sql)
-- [단위 테스트](../../src/test/java/com/logscope/log/LogStreamTests.java), [실제 MySQL·HTTP 통합 테스트](../../src/test/java/com/logscope/LogApiTests.java), [기존 로그 migration 테스트](../../src/test/java/com/logscope/LogStreamMigrationTests.java)
+- [최초 snapshot·연결 API](../../src/main/java/com/logscope/log/controller/LogLiveController.java), [저장과 snapshot](../../src/main/java/com/logscope/log/repository/LogRepository.java), [전송·연결 수명](../../src/main/java/com/logscope/log/service/LogStreamService.java)
+- [신호 경쟁 제어](../../src/main/java/com/logscope/log/support/LogStreamSignal.java), [cursor 검증](../../src/main/java/com/logscope/log/domain/LogStreamCursor.java), [V3 migration](../../src/main/resources/db/migration/V3__log_stream_sequence.sql)
+- [단위 테스트](../../src/test/java/com/logscope/log/service/LogStreamTests.java), [실제 MySQL·HTTP 통합 테스트](../../src/test/java/com/logscope/LogApiTests.java), [기존 로그 migration 테스트](../../src/test/java/com/logscope/LogStreamMigrationTests.java)
 - [MDN SSE](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events), [Spring MVC 비동기 처리](https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-ann-async.html), [MySQL AUTO_INCREMENT](https://dev.mysql.com/doc/refman/8.4/en/innodb-auto-increment-handling.html)
 
 <a id="backend-sse-snapshot-clock-20261028"></a>
@@ -576,8 +576,8 @@ DB 연결을 얻기 전에 기다릴 수 있으므로 HTTP 요청 시작과 DB�
 ### 6. 관련 문서와 코드
 
 - [최초 SSE 설계 기록](#backend-sse-replay-20261028), [SSE API 명세](../contracts/log-sse.md)
-- [snapshot과 시간 경계](../../src/main/java/com/logscope/log/LogStore.java), [snapshot API](../../src/main/java/com/logscope/log/LogLiveController.java)
-- [연결 풀 대기 회귀 테스트](../../src/test/java/com/logscope/LogApiTests.java), [밀리초 경계 단위 테스트](../../src/test/java/com/logscope/log/LogStreamTests.java)
+- [snapshot과 시간 경계](../../src/main/java/com/logscope/log/repository/LogRepository.java), [snapshot API](../../src/main/java/com/logscope/log/controller/LogLiveController.java)
+- [연결 풀 대기 회귀 테스트](../../src/test/java/com/logscope/LogApiTests.java), [밀리초 경계 단위 테스트](../../src/test/java/com/logscope/log/service/LogStreamTests.java)
 
 <a id="backend-elasticsearch-search-20261028"></a>
 
@@ -630,9 +630,9 @@ keyword 필드는 정확한 값 필터·정렬에, text 필드는 분석 기반 
 ### 6. 관련 문서와 코드
 
 - [검색 명세](../contracts/log-search.md), [ES 선택 결정](../decisions/elasticsearch-log-search.md), [아키텍처](../architecture.md), [개발 ES 운영 경계](../operations.md)
-- [검색 API](../../src/main/java/com/logscope/log/LogSearchController.java), [입력/쿼리](../../src/main/java/com/logscope/log/LogSearchQuery.java), [제한된 REST 클라이언트](../../src/main/java/com/logscope/log/LogSearchClient.java)
-- [자동 색인 작업자](../../src/main/java/com/logscope/log/LogSearchIndexer.java), [스케줄 연결](../../src/main/java/com/logscope/log/LogSearchScheduler.java), [원본과 작업 저장](../../src/main/java/com/logscope/log/LogStore.java), [V4](../../src/main/resources/db/migration/V4__log_search_outbox.sql)
-- [Nori 이미지](../../elasticsearch/Dockerfile), [이미지 통합 검사](../../scripts/verify-search.mjs), [입력/자원 단위 테스트](../../src/test/java/com/logscope/log/LogSearchTests.java), [프로토콜 단위 테스트](../../src/test/java/com/logscope/log/LogSearchClientTests.java), [실제 ES/MySQL 통합 테스트](../../src/test/java/com/logscope/log/LogSearchIntegrationTests.java)
+- [검색 API](../../src/main/java/com/logscope/log/controller/LogSearchController.java), [입력/쿼리](../../src/main/java/com/logscope/log/dto/LogSearchQuery.java), [제한된 REST 클라이언트](../../src/main/java/com/logscope/log/client/LogSearchClient.java)
+- [자동 색인 작업자](../../src/main/java/com/logscope/log/service/LogSearchIndexer.java), [스케줄 연결](../../src/main/java/com/logscope/log/config/LogSearchSchedulingConfig.java), [원본과 작업 저장](../../src/main/java/com/logscope/log/repository/LogRepository.java), [V4](../../src/main/resources/db/migration/V4__log_search_outbox.sql)
+- [Nori 이미지](../../elasticsearch/Dockerfile), [이미지 통합 검사](../../scripts/verify-search.mjs), [입력/자원 단위 테스트](../../src/test/java/com/logscope/log/service/LogSearchTests.java), [프로토콜 단위 테스트](../../src/test/java/com/logscope/log/client/LogSearchClientTests.java), [실제 ES/MySQL 통합 테스트](../../src/test/java/com/logscope/log/integration/LogSearchIntegrationTests.java)
 - [Elastic 릴리스](https://www.elastic.co/docs/release-notes/elasticsearch), [Nori](https://www.elastic.co/docs/reference/elasticsearch/plugins/analysis-nori), [refresh](https://www.elastic.co/docs/reference/elasticsearch/rest-apis/refresh-parameter)
 
 
@@ -680,8 +680,8 @@ keyword 필드는 정확한 값 필터·정렬에, text 필드는 분석 기반 
 
 - [샘플 파일 로그·Vector 수집과 상황 목록](../sample-log-pipeline.md)
 - [이전 두 WAS·Vector 학습 기록](#backend-vector-samples-20261027)
-- [20개 이커머스 시나리오](../../sample-was/src/main/java/com/logscope/sample/CommerceScenarios.java)
-- [로그 생성과 예외 연결](../../sample-was/src/main/java/com/logscope/sample/EventGenerator.java)
-- [스케줄·상태·수동 API](../../sample-was/src/main/java/com/logscope/sample/SampleController.java)
-- [샘플 단위 테스트](../../sample-was/src/test/java/com/logscope/sample/SampleTests.java)
+- [20개 이커머스 시나리오](../../sample-was/src/main/java/com/logscope/sample/domain/CommerceScenarios.java)
+- [로그 생성과 예외 연결](../../sample-was/src/main/java/com/logscope/sample/service/EventGenerator.java)
+- [스케줄·상태·수동 API](../../sample-was/src/main/java/com/logscope/sample/controller/SampleController.java)
+- [샘플 단위 테스트](../../sample-was/src/test/java/com/logscope/sample/service/SampleTests.java)
 - [실제 수집 파이프라인 검증](../../scripts/verify-sample-pipeline.mjs)
