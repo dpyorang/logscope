@@ -14,24 +14,26 @@ class EventGenerator {
   private final org.slf4j.Logger logger = LoggerFactory.getLogger("SAMPLE_EVENTS");
 
   String generate(String level, boolean exception, String origin) {
+    return generate(level, exception, origin, null);
+  }
+
+  String generate(String level, boolean exception, String origin, String scenarioCode) {
     if (level == null || !LEVELS.contains(level) || (exception && !level.equals("ERROR")))
       throw new IllegalArgumentException("Invalid sample level");
+    if (!List.of("AUTO", "MANUAL").contains(origin))
+      throw new IllegalArgumentException("Invalid origin");
+    var scenario = CommerceScenarios.select(level, scenarioCode);
     String id = UUID.randomUUID().toString();
     try (var ignored = MDC.putCloseable("eventId", id)) {
       var builder = logger.atLevel(Level.valueOf(level));
-      if (exception) {
-        try {
-          throw new IllegalStateException("Synthetic sample failure");
-        } catch (IllegalStateException e) {
-          builder.setCause(e);
-        }
-      }
-      builder.log("[{}] Synthetic {} event", origin, level);
+      if (exception) builder.setCause(scenario.failure());
+      builder.log("[{}] {}", origin, scenario.message());
     }
     return id;
   }
 
   String random(String origin) {
-    return generate(LEVELS.get(ThreadLocalRandom.current().nextInt(LEVELS.size())), false, origin);
+    String level = LEVELS.get(ThreadLocalRandom.current().nextInt(LEVELS.size()));
+    return generate(level, level.equals("ERROR"), origin);
   }
 }
