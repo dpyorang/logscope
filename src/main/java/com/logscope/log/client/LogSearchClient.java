@@ -190,7 +190,7 @@ public class LogSearchClient {
   }
 
   public static class Unavailable extends RuntimeException {
-    /** 호출자에게 노출할 오류 의미와 원인을 보존한다. */
+    /** ES 통신·응답 실패를 내부 세부 정보 없는 SEARCH_UNAVAILABLE로 표현한다. */
     public Unavailable() {
       super("SEARCH_UNAVAILABLE");
     }

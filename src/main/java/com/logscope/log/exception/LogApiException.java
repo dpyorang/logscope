@@ -8,7 +8,7 @@ public class LogApiException extends RuntimeException {
   private final String code;
   private final List<FieldError> errors;
 
-  /** 호출자에게 노출할 오류 의미와 원인을 보존한다. */
+  /** 명세에 정한 HTTP 상태와 오류 코드를 보관한다. */
   public LogApiException(int status, String code) {
     super(code);
     this.status = status;
@@ -16,7 +16,7 @@ public class LogApiException extends RuntimeException {
     this.errors = List.of();
   }
 
-  /** 호출자에게 노출할 오류 의미와 원인을 보존한다. */
+  /** 잘못된 입력 필드와 세부 코드를 400 VALIDATION_ERROR로 묶는다. */
   public LogApiException(String field, String code) {
     super("VALIDATION_ERROR");
     this.status = 400;

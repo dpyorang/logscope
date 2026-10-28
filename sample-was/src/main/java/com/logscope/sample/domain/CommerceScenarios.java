@@ -171,28 +171,28 @@ public final class CommerceScenarios {
   }
 
   static class OrderProcessingException extends RuntimeException {
-    /** 호출자에게 노출할 오류 의미와 원인을 보존한다. */
+    /** 합성 주문 처리 실패의 설명을 보관한다. */
     OrderProcessingException(String message) {
       super(message);
     }
   }
 
   static class PaymentProcessingException extends RuntimeException {
-    /** 호출자에게 노출할 오류 의미와 원인을 보존한다. */
+    /** 합성 결제 실패의 설명과 하위 원인 체인을 보관한다. */
     PaymentProcessingException(String message, Throwable cause) {
       super(message, cause);
     }
   }
 
   static class InventoryConsistencyException extends RuntimeException {
-    /** 호출자에게 노출할 오류 의미와 원인을 보존한다. */
+    /** 합성 재고 정합성 실패의 설명을 보관한다. */
     InventoryConsistencyException(String message) {
       super(message);
     }
   }
 
   static class FulfillmentException extends RuntimeException {
-    /** 호출자에게 노출할 오류 의미와 원인을 보존한다. */
+    /** 합성 출고 처리 실패의 설명을 보관한다. */
     FulfillmentException(String message) {
       super(message);
     }

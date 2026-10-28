@@ -6,7 +6,7 @@ import java.util.List;
 
 /** 공용 API·SSE 응답 형태를 묶어 구현 계층에서 독립시킨다. */
 public final class LogResponses {
-  /** 직접 생성을 막고 정적 변환만 사용한다. */
+  /** 응답 값은 내부 record로 생성하므로 묶음 클래스의 직접 생성을 막는다. */
   private LogResponses() {}
 
   public record Rejected(int index, String code, List<LogApiException.FieldError> errors) {}
