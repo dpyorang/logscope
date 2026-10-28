@@ -18,6 +18,7 @@
 | [샘플 로그 수집의 지연 원인과 해결 과정 회고](#backend-vector-troubleshooting-review-20261027) | 2026-10-27 23:45 KST | 디스크 버퍼 정체·이미지 충돌·전달 지연·장애 주입을 증거와 조치로 구분. 미확정 원인도 명시. |
 | [SSE 실시간 로그와 저장 순서 기반 복구](#backend-sse-replay-20261028) | 2026-10-28 15:01 KST | 폴링 대신 서버 push를 선택하고 snapshot·재연결·중복·일시정지 후 replay의 백엔드 동작을 구현. 프론트 연결은 별도 작업. |
 | [SSE 최초 조회의 DB 연결 대기와 시간 경계 보정](#backend-sse-snapshot-clock-20261028) | 2026-10-28 15:15 KST | 연결 대기 중 저장된 로그가 cursor에만 포함되는 경쟁과 밀리초 종료 경계를 수정. 실제 MySQL 회귀 재현. |
+| [Elasticsearch 검색과 MySQL outbox 동기화](#backend-elasticsearch-search-20261028) | 2026-10-28 16:49 KST | Redis 없이 Nori 메시지 검색·정확한 필터와 영속 색인 재시도/복구 구현. 역색인·refresh·부분 실패와 테스트에서 배운 내용. |
 
 <a id="backend-foundation"></a>
 
@@ -576,3 +577,59 @@ DB 연결을 얻기 전에 기다릴 수 있으므로 HTTP 요청 시작과 DB�
 - [최초 SSE 설계 기록](#backend-sse-replay-20261028), [SSE API 명세](../contracts/log-sse.md)
 - [snapshot과 시간 경계](../../src/main/java/com/logscope/log/LogStore.java), [snapshot API](../../src/main/java/com/logscope/log/LogLiveController.java)
 - [연결 풀 대기 회귀 테스트](../../src/test/java/com/logscope/LogApiTests.java), [밀리초 경계 단위 테스트](../../src/test/java/com/logscope/log/LogStreamTests.java)
+
+<a id="backend-elasticsearch-search-20261028"></a>
+
+## 주제: Elasticsearch 검색과 MySQL outbox 동기화 / 시간: 2026-10-28 16:49 KST
+
+### 1. 사용자 요청과 목표
+
+사용자는 ERROR/INFO 같은 레벨 구분과 코드에 작성한 ‘결제 오류’ 메시지 검색을 원했다. MySQL FULLTEXT와 Elasticsearch를 성능·검색 품질·운영·학습 측면에서 비교한 뒤, Redis를 제외하고 ES 기반 레벨·서버·기간·메시지 검색과 MySQL 원본 유지/색인 동기화를 구현하도록 요청했다. ES를 써야 검색할 수 있어서가 아니라 검색엔진의 분석·색인 원리와 장애 처리를 직접 배우려는 목표에 맞춘 선택이다.
+
+이번 구현은 백엔드 검색 API와 영속 동기화다. 기존 상세·정적 목록·SSE는 유지하며 프론트 검색 화면과 과거 페이지 커서는 별도 작업이다. 현재 검색 결과가 최신50 기본·100 최대이고 더 있으면 잘림을 알린다는 범위를 명확히 했다.
+
+### 2. 추가·변경한 내용
+
+`GET /api/v1/logs/search`는 from/to(UTC·최대24시간·시작 포함/끝 제외), 선택 level/instanceId/keyword와 size를 받는다. 레벨과 서버는 정확히 일치시키고, message는 Nori 분석 후 입력 토큰을 모두 포함하는 AND match로 찾는다. 영어는 lowercase 처리한다. 관련도 점수 대신 발생시각/eventId 내림차순으로 정렬하고, size보다 한 건 더 읽어 truncated를 판단한다. exception 원문은 검색 색인에 복제하지 않고 MySQL 상세에서 읽는다.
+
+Elasticsearch9.5.5 공식 이미지에 같은 버전 Nori를 설치했다. ID/레벨/서버/서비스는 keyword, 메시지는 text, 발생시각은 date, 예외 여부는 boolean이다. dynamic strict로 예상 필드만 받는다. Nori의 mixed 복합어 분해와 lowercase를 조합하고 사용자 검색어는 match의 값으로만 전달해 raw Query DSL/SQL 문법을 실행하지 않는다.
+
+V4 migration은 기존 로그를 색인 outbox에 채운다. 새 로그는 원본·SSE 순서·outbox를 같은 MySQL 트랜잭션에 저장한다. 자동 작업자는 최대50건씩 읽어 ES bulk로 보내고 항목별 성공과 refresh 반영, 색인 UUID를 확인한 뒤 성공 작업만 제거한다. 같은 eventId를 ES document ID로 사용하므로 재전송 시 문서를 중복 생성하지 않는다. 실패 작업은1초부터 최대60초 간격으로 재시도하며 영구 오류도 조용히 버리지 않는다.
+
+색인 형식 버전과 MySQL source epoch를 매핑 metadata에 기록하고 다른 원본의 색인은 덮어쓰지 않는다. 색인 UUID가 바뀌면 원본 전체를 다시 대기열에 넣는다. 검색 응답은 전역 pendingCount/retryingCount/indexingPending으로 미반영 작업을 알린다. ES 장애·잘못된 응답·shard 실패는503이며 빈 결과나 LIKE fallback으로 숨기지 않는다. 동시 검색16개, HTTP 본문/기한과 bulk/응답 byte 상한도 적용했다.
+
+### 3. 선택 이유와 대안
+
+MySQL FULLTEXT도 역색인을 사용하며 별도 검색 서버 없이 구현할 수 있다. ES는 한국어 분석기·필드별 검색 규칙과 검색 부하 분리, 검색엔진 학습을 위해 선택했다. 어떤 데이터에서도 ES가 더 빠르다는 측정 결과나 현재 로그가 적다는 가정은 아니다. Redis 캐시가 필요한 반복 조회 병목은 확인되지 않았고 최신 검색 결과의 무효화 비용도 생겨 제외했다. Kafka는 이번 색인 동기화에 도입하지 않았다.
+
+역색인은 ‘단어→그 단어가 있는 문서 ID’의 찾아보기다. 개념적으로 결제가 있는 문서와 오류가 있는 문서의 교집합을 구하고 서버/레벨/기간 조건을 적용한다. Nori는 문장을 토큰으로 나누고 ES는 이 토큰을 찾는다. ‘결제 처리 중 오류가 발생했습니다’가 ‘결제 오류’ 검색에 포함될 수 있지만, 단순 리터럴 문자열 포함이나 ‘실패=오류’의 의미 추론을 자동 보장하는 기능은 아니다. 실제 `_analyze`에서 결제·오류·payment 토큰을 확인했다.
+
+MySQL에 저장한 뒤 ES에도 직접 저장하면 중간 실패로 한쪽만 남을 수 있다. outbox는 원본과 할 일을 함께 commit해 이 문제를 다룬다. ES 성공 뒤 DB commit이 실패해도 다음 재전송의 같은 `_id`가 문서 중복을 막는다. 전송 의미는 at-least-once다. 작업자 간에는 별도 검색 상태 행을 잠그며 원본의 저장 순서 행을 ES 응답 대기 동안 잡지 않는다.
+
+ES의 refresh는 색인 내용을 검색에서 볼 수 있게 하는 과정이다. MySQL commit과 같은 원자적 시점이 아니다. bulk HTTP200도 전체 성공을 뜻하지 않아 항목별 상태를 확인하고 `refresh=wait_for` 이후에 작업을 제거한다. SSE는 원본 commit에서 전달되므로 화면에 보인 로그가 검색에는 나중에 나타날 수 있다. 대기열0은 관측 이후 새 로그가 영원히 없다는 뜻이 아니며 검색 결과와 원본의 완전한 snapshot을 주장하지 않는다.
+
+### 4. 동작 확인과 한계
+
+기존 테스트를 유지한 서버·샘플 WAS99개 중 새20개는 검색 입력/UTC/Unicode/크기·AND 쿼리,16개 동시 검색과 실패 후 슬롯 반환, bulk 항목별 결과·잘못된/과대 응답·본문 정체 기한·shard 실패, 실제 Nori/MySQL 검색·중복·부분 거절·ES 중단·재전송·색인 유실·다른 원본 소유·두 작업자 동시 소비·outbox 원자성을 검증했다. 기존 데이터가 V4 대기열에 들어가는 migration도 확인했다.
+
+실제 ES의 ingest fail processor로 특정 합성 항목만 거절시켜 정상 항목은 검색되고 거절 작업만 대기하는 것을 확인했다. ES 컨테이너를 일시정지한 동안 원본 저장은201, 검색은503이고 대기 작업이 남았다. 복구 후 새 작업자에서도 처리됐다. 색인을 삭제한 격리 실험에서는 MySQL에서 같은 검색 결과를 재구성했다. 다른 source epoch의 색인은 변경하지 않고503을 반환했다.
+
+별도 이미지 통합 검사 scripts/verify-search.mjs는 수동 호출이 아닌 실제 자동 작업자의 검색·장애 복구·재구성을 검증한다. 기존 프론트 브라우저10개·실제 MySQL SSR/상세·두 WAS의60초 자동/수동·Logback 회전·Vector 배치/체크포인트/재시도도 유지했다. 프론트 검색 화면의 검증 완료를 뜻하지 않는다.
+
+현재 단일 shard·replica0·보안 비활성·호스트 포트 미공개는 합성 데이터 개발용이다. 처리량/검색 지연 SLA, 운영 인증/TLS·디스크 용량·보존·무중단 재색인, 같은 UUID를 유지한 개별 ES 문서의 외부 수정/삭제 자동 감지와 원본 직접 SQL 변경은 보장하지 않는다. 영속 대기열도 장기 장애에서는 디스크를 사용하므로 운영 한도가 필요하다. 최신 결과의 truncated와 색인 대기 상태는 과거 페이지 탐색이나 전체 건수와 다르다.
+
+### 5. 배운 개념과 남은 일
+
+keyword 필드는 정확한 값 필터·정렬에, text 필드는 분석 기반 검색에 사용한다. 원문 `_source`와 분석 토큰은 다르므로 검색은 lowercase로 하더라도 원문 메시지를 바꿀 필요가 없다. bulk는 action과 document를 번갈아 쓰는 NDJSON이며 HTTP 상태와 항목 상태를 따로 읽어야 한다. 검색 결과와 색인 대기 상태를 구분하는 것도 오류를 숨기지 않는 API 설계다.
+
+원자성 실패를 재현하려고 처음 만든 테스트 trigger는 MySQL의 SUPER 권한 제한에 걸렸다. 권한/서버 보안을 완화하지 않고, 격리 테스트의 임시 CHECK 제약으로 outbox만 거절하도록 바꿨다. 원본과 순서까지 롤백되는 것을 확인한 뒤 제약을 제거했다. 또 Mockito에서 예외 stub을 일반 when으로 다시 설정하면 기존 예외가 설정 도중 실행되므로 doReturn으로 장애 해제 상황을 만들었다. 테스트 설정 문제와 실제 저장/네트워크 문제를 분리한 사례다.
+
+다음은 프론트의 검색 조건/잘림/색인 지연·장애 안내 연결, 과거 페이지 커서, 실제 데이터 패턴에 맞는 분석/실행 비용 측정이다. 검색 조건과 실시간 SSE의 관계는 별도 화면 작업에서 맞춰야 한다. 신규 기능을 이유로 기존 API 계약을 몰래 바꾸거나 ES 검색 지연을 원본 유실로 설명하지 않는다.
+
+### 6. 관련 문서와 코드
+
+- [검색 명세](../contracts/log-search.md), [ES 선택 결정](../decisions/elasticsearch-log-search.md), [아키텍처](../architecture.md), [개발 ES 운영 경계](../operations.md)
+- [검색 API](../../src/main/java/com/logscope/log/LogSearchController.java), [입력/쿼리](../../src/main/java/com/logscope/log/LogSearchQuery.java), [제한된 REST 클라이언트](../../src/main/java/com/logscope/log/LogSearchClient.java)
+- [자동 색인 작업자](../../src/main/java/com/logscope/log/LogSearchIndexer.java), [스케줄 연결](../../src/main/java/com/logscope/log/LogSearchScheduler.java), [원본과 작업 저장](../../src/main/java/com/logscope/log/LogStore.java), [V4](../../src/main/resources/db/migration/V4__log_search_outbox.sql)
+- [Nori 이미지](../../elasticsearch/Dockerfile), [이미지 통합 검사](../../scripts/verify-search.mjs), [입력/자원 단위 테스트](../../src/test/java/com/logscope/log/LogSearchTests.java), [프로토콜 단위 테스트](../../src/test/java/com/logscope/log/LogSearchClientTests.java), [실제 ES/MySQL 통합 테스트](../../src/test/java/com/logscope/log/LogSearchIntegrationTests.java)
+- [Elastic 릴리스](https://www.elastic.co/docs/release-notes/elasticsearch), [Nori](https://www.elastic.co/docs/reference/elasticsearch/plugins/analysis-nori), [refresh](https://www.elastic.co/docs/reference/elasticsearch/rest-apis/refresh-parameter)
