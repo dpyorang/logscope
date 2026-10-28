@@ -16,6 +16,8 @@
 | [두 WAS의 파일 로그와 Vector 배치 수집](#backend-vector-samples-20261027) | 2026-10-27 23:10 KST | 자동·수동 생성과 파일·배치 수집 구현. 디스크 버퍼 정체 회피와 검증 이미지 격리 이유를 기록. |
 | [단독 로그 전달 지연 측정과 단계별 진단](#backend-isolated-event-diagnostics-20261027) | 2026-10-27 23:31 KST | 자동 로그의 간섭을 차단하고 실제 전달 시간·제한된 실패 진단을 추가. 제품 전송 정책은 유지. |
 | [샘플 로그 수집의 지연 원인과 해결 과정 회고](#backend-vector-troubleshooting-review-20261027) | 2026-10-27 23:45 KST | 디스크 버퍼 정체·이미지 충돌·전달 지연·장애 주입을 증거와 조치로 구분. 미확정 원인도 명시. |
+| [SSE 실시간 로그와 저장 순서 기반 복구](#backend-sse-replay-20261028) | 2026-10-28 15:01 KST | 폴링 대신 서버 push를 선택하고 snapshot·재연결·중복·일시정지 후 replay의 백엔드 동작을 구현. 프론트 연결은 별도 작업. |
+| [SSE 최초 조회의 DB 연결 대기와 시간 경계 보정](#backend-sse-snapshot-clock-20261028) | 2026-10-28 15:15 KST | 연결 대기 중 저장된 로그가 cursor에만 포함되는 경쟁과 밀리초 종료 경계를 수정. 실제 MySQL 회귀 재현. |
 
 <a id="backend-foundation"></a>
 
@@ -490,3 +492,87 @@ Logback은 애플리케이션의 로그를 파일에 남기고 Vector는 그 파
 - [샘플 파이프라인과 전달 한계](../sample-log-pipeline.md)
 - [Vector 디스크 버퍼 공식 이슈 #26523](https://github.com/vectordotdev/vector/issues/26523)
 - [Vector 설정](../../collectors/vector.yaml), [검증 이미지 격리](../../scripts/verify.sh), [실제 파이프라인 검증과 제한된 진단](../../scripts/verify-sample-pipeline.mjs)
+
+<a id="backend-sse-replay-20261028"></a>
+
+## 주제: SSE 실시간 로그와 저장 순서 기반 복구 / 시간: 2026-10-28 15:01 KST
+
+### 1. 사용자 요청과 목표
+
+샘플 WAS에서 로그가 계속 발생해도 화면에서는 새로고침이 필요했다. 사용자는 주기 조회보다 연결을 유지하며 새 로그를 전달받는 SSE를 선택하고, 최초 조회와 연결 사이 누락·재연결·중복 제거·일시정지 후 복구와 단위/통합 테스트를 요청했다. 이번 백엔드 작업은 이를 위한 snapshot API·SSE 전송·영속 replay 기준이다. 화면에서 연결하고 멈추는 UI는 프론트의 별도 작업이며 현재 프론트 사용자 지시는 검토 단계다.
+
+### 2. 추가·변경한 내용
+
+`GET /api/v1/logs/live`는 최근24시간 최신50건과 cursor를 같은 DB snapshot에서 읽고, 더 많은 기록은 truncated로 알린다. 기존 정적 목록의 50건 초과501 정책은 그대로다. `GET /api/v1/logs/stream?after=...`은 cursor 이후 저장된 summary를 SSE log 이벤트로 전송한다. 재연결의 Last-Event-ID가 있으면 우선하며 입력 형식·다른 DB epoch·미래 순서를 검사한다. ready는 연결 시작점 안내일 뿐 처리 cursor를 앞당기는 이벤트가 아니다.
+
+예를 들어 최초 조회 기준이40일 때 로그41이 저장되고 나서 연결돼도41부터 replay한다. 로그의 발생시각이 과거여도 저장 순서는41이므로 건너뛰지 않는다. 연결을 닫아 일시정지하고42·43이 저장됐다면, 마지막 정상 처리41로 다시 연결할 때42·43을 받는다. 끊어지기 직전에 이미 받은 로그가 다시 올 수 있어 화면에서 eventId 중복 제거가 필요하다. 서버의 중복 수집 판정도 유지해 같은 eventId·같은 내용은 새 순서나 새 이벤트를 만들지 않는다.
+
+V3 migration은 기존 로그에 고유 stream_sequence를 부여하고 DB epoch·마지막 순서를 지속 저장한다. INSERT마다 한 상태 행을 FOR UPDATE로 잠그고 로그와 마지막 순서를 같은 트랜잭션에서 commit한다. commit 후 메모리 신호로 연결을 깨우고, DB가 재전송 원본을 맡는다. 신호 버전을 먼저 읽고 조회 후 변경이 없을 때 대기해 조회/대기 사이 신호도 놓치지 않는다.
+
+한 번에50건을 읽고 연결당128건 또는 약55~60초 후 종료해 이어받는다. 서버 동시 연결은32개다. 응답 초기화 전 SseEmitter의 내부 버퍼도128건으로 제한하고, HTTP 응답 완료와 작업자 종료가 모두 확인돼야 슬롯을 반환한다. heartbeat는 약15초, 재연결 안내는3초이며 DB 장애는 연결 전503 또는 연결 뒤 stream-error 후 종료로 구분한다.
+
+### 3. 선택 이유와 대안
+
+폴링도 실제 API 연동이다. 브라우저가 몇 초마다 새 로그를 묻는 방식이라 구현이 단순하지만 데이터가 없어도 요청하고 다음 조회까지 대기한다. 사용자가 원한 것은 서버가 새 로그를 알리는 흐름이므로 단방향 HTTP 스트림인 SSE를 선택했다. 양방향 메시지가 필요한 채팅/제어 기능이 아니어서 WebSocket은 도입하지 않았다. Kafka는 현재 두 샘플 WAS의 화면 갱신에 필수 구성요소가 아니므로 계속 보류한다.
+
+SSE 자동 재연결만으로 무손실·중복 방지가 완성되지는 않는다. 발생시각은 늦은 전송 때문에 순서 기준으로 부적합하고, AUTO_INCREMENT도 번호 할당과 commit 순서가 다를 수 있다. 작은 번호가 늦게 commit되면 큰 번호를 이미 받은 cursor 뒤로 빠진다. 현재 규모에서는 상태 행 잠금으로 commit 순서를 맞추는 단순한 방법을 선택했다. 대신 수집 쓰기가 직렬화되는 비용이 있어 고부하 성능을 보장하지 않는다.
+
+메모리 이벤트 목록만 보관하면 재시작 때 복구 자료가 사라진다. 저장 로그와 cursor를 DB에 유지하면 연결은 언제든 다시 만들 수 있다. 전송 의미는 at-least-once이며 마지막 정상 처리 cursor와 eventId로 클라이언트가 중복을 제거한다. 프론트는 오류 코드·프레임 검증과 처리 cursor를 직접 관리하는 fetch 기반 SSE 파서를 검토했다. 이는 반복 요청 폴링이 아니며 EventSource가 앱 검증 전에 Last-Event-ID를 갱신할 수 있는 점도 고려한다.
+
+### 4. 동작 확인과 한계
+
+서버와 샘플 WAS의77개 테스트 중 새16개는 cursor 형식·overflow·다른 epoch·미래 cursor, header 우선순위·잘못된 query, 신호 경쟁,32개 연결 상한과 슬롯 반환, DB 장애, 초기 버퍼 한도, 실제 HTTP SSE의 snapshot/연결 간격·신규 push·재연결·일시정지 후 replay·중복,128건 이후 이어받기,50건 snapshot 잘림, 동시 저장 순서, 대기 중 저장과 snapshot 경쟁, 범위 밖 로그 replay, 기존 로그 V2→V3 migration과 재기동 시 migration 상태 보존을 확인했다. 기존 실제 MySQL·HTTP 테스트를 단위 테스트로 대체하지 않았다.
+
+실제 MySQL·Spring Boot·Next.js 목록/상세와 브라우저 기존10개 시나리오, 두 WAS·Logback 회전·Vector 배치/체크포인트/재전송도 유지했다. 현재 프론트에는 SSE UI를 추가하지 않았으므로 이 결과를 실시간 화면의 검증 완료라고 하지 않는다. 재기동 테스트는 DB epoch/순서와 migration의 지속성을 확인하며 다중 앱 운영이나 전체 장애복구 시험은 아니다.
+
+최신50건 snapshot은 전체 이력 조회가 아니다. stream은 모든 신규 저장 로그를 전달하지만 화면의 최근24시간 필터·메모리50건·초점·스크롤·일시정지 버튼 검증은 프론트에 남아 있다. 로그 삭제·DB 복원·epoch 교체 뒤 무손실 복구, 인증·운영 프록시, 고부하/다중 앱 즉시 알림을 보장하지 않는다. Vector 배치 대기2초는 화면 전송을 SSE로 바꿔도 남는다.
+
+### 5. 배운 개념과 남은 일
+
+snapshot은 여러 값을 같은 시점의 DB 모습으로 읽는 것이다. cursor는 마지막 정상 처리 위치를 가리키는 책갈피이며, 이 기능의 책갈피는 화면 정렬 시각과 다르다. epoch는 같은 번호라도 다른 DB의 기록으로 오인하지 않게 하는 구분자다. heartbeat는 로그가 없을 때도 연결 생존·끊김을 확인하는 빈 신호다.
+
+처음 테스트에서는 기존 UTC 밀리초 규칙을 무시하고 나노초 시각을 만들어 입력이400으로 거절됐다. 테스트 합성 시각을 밀리초로 맞췄다. V3 추가 후 초기 검증의 예상 migration 버전2도3으로 갱신했다. 새 동작 때문에 기존 규칙을 완화하지 않고 테스트 입력/기대값을 실제 변경에 맞추는 과정이다.
+
+프론트에는 SSR snapshot 인계·same-origin 중계·연결/재연결/복구불가 상태·정상 처리 cursor·중복 제거·일시정지/재개와 상세/초점/스크롤 보존을 요청했다. 구현은 사용자가 해당 채팅에서 직접 지시한다. 그다음 실제 브라우저 SSE 경로를 함께 검증해야 한다. 추후 쓰기 부하가 커지면 순서 행 잠금 비용과 영속 이벤트 분배 방식을 측정하고 재설계한다.
+
+### 6. 관련 문서와 코드
+
+- [SSE 명세](../contracts/log-sse.md), [SSE 선택과 저장 순서 결정](../decisions/sse-log-delivery.md), [공통 아키텍처](../architecture.md)
+- [최초 snapshot·연결 API](../../src/main/java/com/logscope/log/LogLiveController.java), [저장과 snapshot](../../src/main/java/com/logscope/log/LogStore.java), [전송·연결 수명](../../src/main/java/com/logscope/log/LogStreamService.java)
+- [신호 경쟁 제어](../../src/main/java/com/logscope/log/LogStreamSignal.java), [cursor 검증](../../src/main/java/com/logscope/log/LogStreamCursor.java), [V3 migration](../../src/main/resources/db/migration/V3__log_stream_sequence.sql)
+- [단위 테스트](../../src/test/java/com/logscope/log/LogStreamTests.java), [실제 MySQL·HTTP 통합 테스트](../../src/test/java/com/logscope/LogApiTests.java), [기존 로그 migration 테스트](../../src/test/java/com/logscope/LogStreamMigrationTests.java)
+- [MDN SSE](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events), [Spring MVC 비동기 처리](https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-ann-async.html), [MySQL AUTO_INCREMENT](https://dev.mysql.com/doc/refman/8.4/en/innodb-auto-increment-handling.html)
+
+<a id="backend-sse-snapshot-clock-20261028"></a>
+
+## 주제: SSE 최초 조회의 DB 연결 대기와 시간 경계 보정 / 시간: 2026-10-28 15:15 KST
+
+### 1. 사용자 요청과 목표
+
+사용자는 기존 SSE 변경을 다시 검토하고 문제가 없으면 반영하도록 요청했다. [앞선 SSE 기록](#backend-sse-replay-20261028)의 저장 순서·동일 DB snapshot 기준을 재검토하면서, DB snapshot 외부에서 먼저 계산한 시간 경계의 경쟁을 발견했다. 같은 snapshot에서 읽는 것과 그 snapshot에 맞는 시간 범위를 정하는 것은 별개다.
+
+### 2. 추가·변경한 내용
+
+기존에는 HTTP 요청 처리 시작 때 종료 시각을 정한 뒤 DB 연결을 얻었다. 예를 들어 종료 시각이10:00:00.000이고 연결 대기 중10:00:00.050 로그가 저장되면, 나중에 읽은 cursor는 이 로그까지 포함하지만 목록은 종료 시각 밖이라 제외할 수 있었다. stream은 cursor 뒤부터 읽으므로 이 로그가 양쪽에서 빠진다.
+
+종료 시각 계산을 DB의 첫 consistent read로 cursor를 읽은 뒤로 옮겼다. 종료 제외 규칙과 UTC 밀리초를 함께 지키기 위해 현재 밀리초의 다음 경계를 종료 시각으로 사용한다. 현재 시각이00.999123이면 종료는01.000이고, 정확히00.999여도 동일하다. 최근24시간 길이는 그대로다. 응답 필드와 기존 정적 조회·수집 API는 바꾸지 않았다.
+
+### 3. 선택 이유와 대안
+
+연결 대기가 짧다는 가정이나 임의로 몇 초를 더하는 여유값은 경쟁을 해결하지 못한다. 요청 시작 시각보다 실제 DB view를 기준으로 시간을 정하면 연결 대기 동안 commit된 정상 시각 로그도 최초 목록에 들어간다. 다음 밀리초 경계는 같은 밀리초 로그를 종료 제외 조건 때문에 건너뛰지 않게 한다. 실제 미래 시각 로그를 모두 포함한다는 뜻은 아니며, 범위 밖·미래 로그 처리와 클라이언트 시계차는 기존 명세대로 구분한다.
+
+### 4. 동작 확인과 한계
+
+실제 MySQL 연결 풀의 모든 연결을 점유한 뒤 HTTP snapshot을 시작해 연결 대기를 확인했다. 점유한 연결로 새 합성 로그와 sequence를 commit한 뒤 연결을 반환했다. 수정 전에는 예상1건 대신0건으로 실패했고, 수정 후에는 로그와 해당 cursor를 함께 받았다. 별도 단위 테스트로 같은 밀리초와 초 경계,24시간 길이도 확인했다. 기존 테스트를 유지해 서버·샘플 WAS79개와 기존 화면·DB·파일 수집 경로가 동작함을 확인했다.
+
+이 검증은 DB 연결 대기로 생기는 경계를 다룬다. 생산자/서버 시계차, 미래 로그의 나중 자동 표시, 고부하 SLA나 프론트 SSE 화면 완료를 보장하지 않는다. 이전 기록의 snapshot 경쟁 테스트는 상태 행 잠금과 commit 대기를 확인한 범위였고 이번 연결 풀 대기 조건을 포함하지 않았다.
+
+### 5. 배운 개념과 남은 일
+
+DB 연결을 얻기 전에 기다릴 수 있으므로 HTTP 요청 시작과 DB를 읽는 시점은 같지 않다. 같은 트랜잭션으로 값을 읽어도 외부에서 미리 만든 시간 조건이 오래됐으면 누락이 생긴다. 시작 포함·끝 제외 같은 경계 규칙은 데이터의 밀리초 정밀도와 함께 검증해야 한다. 프론트에서는 서버가 반환한 from/to/cursor를 함께 인계하고 별도 시각을 섞지 않는 것이 다음 연결의 출발점이다.
+
+### 6. 관련 문서와 코드
+
+- [최초 SSE 설계 기록](#backend-sse-replay-20261028), [SSE API 명세](../contracts/log-sse.md)
+- [snapshot과 시간 경계](../../src/main/java/com/logscope/log/LogStore.java), [snapshot API](../../src/main/java/com/logscope/log/LogLiveController.java)
+- [연결 풀 대기 회귀 테스트](../../src/test/java/com/logscope/LogApiTests.java), [밀리초 경계 단위 테스트](../../src/test/java/com/logscope/log/LogStreamTests.java)
