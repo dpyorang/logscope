@@ -17,6 +17,7 @@
 | [단독 로그 전달 지연 측정과 단계별 진단](#backend-isolated-event-diagnostics-20261027) | 2026-10-27 23:31 KST | 자동 로그의 간섭을 차단하고 실제 전달 시간·제한된 실패 진단을 추가. 제품 전송 정책은 유지. |
 | [샘플 로그 수집의 지연 원인과 해결 과정 회고](#backend-vector-troubleshooting-review-20261027) | 2026-10-27 23:45 KST | 디스크 버퍼 정체·이미지 충돌·전달 지연·장애 주입을 증거와 조치로 구분. 미확정 원인도 명시. |
 | [SSE 실시간 로그와 저장 순서 기반 복구](#backend-sse-replay-20261028) | 2026-10-28 15:01 KST | 폴링 대신 서버 push를 선택하고 snapshot·재연결·중복·일시정지 후 replay의 백엔드 동작을 구현. 프론트 연결은 별도 작업. |
+| [SSE 최초 조회의 DB 연결 대기와 시간 경계 보정](#backend-sse-snapshot-clock-20261028) | 2026-10-28 15:15 KST | 연결 대기 중 저장된 로그가 cursor에만 포함되는 경쟁과 밀리초 종료 경계를 수정. 실제 MySQL 회귀 재현. |
 
 <a id="backend-foundation"></a>
 
@@ -541,3 +542,37 @@ snapshot은 여러 값을 같은 시점의 DB 모습으로 읽는 것이다. cur
 - [신호 경쟁 제어](../../src/main/java/com/logscope/log/LogStreamSignal.java), [cursor 검증](../../src/main/java/com/logscope/log/LogStreamCursor.java), [V3 migration](../../src/main/resources/db/migration/V3__log_stream_sequence.sql)
 - [단위 테스트](../../src/test/java/com/logscope/log/LogStreamTests.java), [실제 MySQL·HTTP 통합 테스트](../../src/test/java/com/logscope/LogApiTests.java), [기존 로그 migration 테스트](../../src/test/java/com/logscope/LogStreamMigrationTests.java)
 - [MDN SSE](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events), [Spring MVC 비동기 처리](https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-ann-async.html), [MySQL AUTO_INCREMENT](https://dev.mysql.com/doc/refman/8.4/en/innodb-auto-increment-handling.html)
+
+<a id="backend-sse-snapshot-clock-20261028"></a>
+
+## 주제: SSE 최초 조회의 DB 연결 대기와 시간 경계 보정 / 시간: 2026-10-28 15:15 KST
+
+### 1. 사용자 요청과 목표
+
+사용자는 기존 SSE 변경을 다시 검토하고 문제가 없으면 반영하도록 요청했다. [앞선 SSE 기록](#backend-sse-replay-20261028)의 저장 순서·동일 DB snapshot 기준을 재검토하면서, DB snapshot 외부에서 먼저 계산한 시간 경계의 경쟁을 발견했다. 같은 snapshot에서 읽는 것과 그 snapshot에 맞는 시간 범위를 정하는 것은 별개다.
+
+### 2. 추가·변경한 내용
+
+기존에는 HTTP 요청 처리 시작 때 종료 시각을 정한 뒤 DB 연결을 얻었다. 예를 들어 종료 시각이10:00:00.000이고 연결 대기 중10:00:00.050 로그가 저장되면, 나중에 읽은 cursor는 이 로그까지 포함하지만 목록은 종료 시각 밖이라 제외할 수 있었다. stream은 cursor 뒤부터 읽으므로 이 로그가 양쪽에서 빠진다.
+
+종료 시각 계산을 DB의 첫 consistent read로 cursor를 읽은 뒤로 옮겼다. 종료 제외 규칙과 UTC 밀리초를 함께 지키기 위해 현재 밀리초의 다음 경계를 종료 시각으로 사용한다. 현재 시각이00.999123이면 종료는01.000이고, 정확히00.999여도 동일하다. 최근24시간 길이는 그대로다. 응답 필드와 기존 정적 조회·수집 API는 바꾸지 않았다.
+
+### 3. 선택 이유와 대안
+
+연결 대기가 짧다는 가정이나 임의로 몇 초를 더하는 여유값은 경쟁을 해결하지 못한다. 요청 시작 시각보다 실제 DB view를 기준으로 시간을 정하면 연결 대기 동안 commit된 정상 시각 로그도 최초 목록에 들어간다. 다음 밀리초 경계는 같은 밀리초 로그를 종료 제외 조건 때문에 건너뛰지 않게 한다. 실제 미래 시각 로그를 모두 포함한다는 뜻은 아니며, 범위 밖·미래 로그 처리와 클라이언트 시계차는 기존 명세대로 구분한다.
+
+### 4. 동작 확인과 한계
+
+실제 MySQL 연결 풀의 모든 연결을 점유한 뒤 HTTP snapshot을 시작해 연결 대기를 확인했다. 점유한 연결로 새 합성 로그와 sequence를 commit한 뒤 연결을 반환했다. 수정 전에는 예상1건 대신0건으로 실패했고, 수정 후에는 로그와 해당 cursor를 함께 받았다. 별도 단위 테스트로 같은 밀리초와 초 경계,24시간 길이도 확인했다. 기존 테스트를 유지해 서버·샘플 WAS79개와 기존 화면·DB·파일 수집 경로가 동작함을 확인했다.
+
+이 검증은 DB 연결 대기로 생기는 경계를 다룬다. 생산자/서버 시계차, 미래 로그의 나중 자동 표시, 고부하 SLA나 프론트 SSE 화면 완료를 보장하지 않는다. 이전 기록의 snapshot 경쟁 테스트는 상태 행 잠금과 commit 대기를 확인한 범위였고 이번 연결 풀 대기 조건을 포함하지 않았다.
+
+### 5. 배운 개념과 남은 일
+
+DB 연결을 얻기 전에 기다릴 수 있으므로 HTTP 요청 시작과 DB를 읽는 시점은 같지 않다. 같은 트랜잭션으로 값을 읽어도 외부에서 미리 만든 시간 조건이 오래됐으면 누락이 생긴다. 시작 포함·끝 제외 같은 경계 규칙은 데이터의 밀리초 정밀도와 함께 검증해야 한다. 프론트에서는 서버가 반환한 from/to/cursor를 함께 인계하고 별도 시각을 섞지 않는 것이 다음 연결의 출발점이다.
+
+### 6. 관련 문서와 코드
+
+- [최초 SSE 설계 기록](#backend-sse-replay-20261028), [SSE API 명세](../contracts/log-sse.md)
+- [snapshot과 시간 경계](../../src/main/java/com/logscope/log/LogStore.java), [snapshot API](../../src/main/java/com/logscope/log/LogLiveController.java)
+- [연결 풀 대기 회귀 테스트](../../src/test/java/com/logscope/LogApiTests.java), [밀리초 경계 단위 테스트](../../src/test/java/com/logscope/log/LogStreamTests.java)
