@@ -57,6 +57,7 @@ class LogStore {
                 event.exception(),
                 sequence);
             jdbc.update("UPDATE log_stream_state SET last_sequence = ? WHERE id = 1", sequence);
+            jdbc.update("INSERT INTO log_search_outbox (event_id) VALUES (?)", event.eventId());
           });
       // The transaction is committed before waking readers.
       signal.changed();
