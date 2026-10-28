@@ -333,4 +333,274 @@ class LogApiTests {
     assertThat(items.get(0).get("eventId").asString()).isEqualTo(second.get("eventId"));
     problem(send("GET", RANGE + "&size=1", null, ""), 501, "PAGINATION_NOT_IMPLEMENTED");
   }
+
+  private Map<String, Object> liveEvent() {
+    var body = event(UUID.randomUUID().toString());
+    body.put(
+        "occurredAt",
+        java.time.Instant.now()
+            .minusSeconds(30)
+            .truncatedTo(java.time.temporal.ChronoUnit.MILLIS)
+            .toString());
+    return body;
+  }
+
+  private record Frame(String event, String id, String data) {}
+
+  private Frame frame(java.io.BufferedReader reader) throws Exception {
+    return CompletableFuture.supplyAsync(
+            () -> {
+              try {
+                String type = "", id = "";
+                var data = new StringBuilder();
+                while (true) {
+                  String line = reader.readLine();
+                  if (line == null)
+                    throw new IllegalStateException("SSE closed before expected frame");
+                  if (line.isEmpty()) {
+                    if (!type.isEmpty()) return new Frame(type, id, data.toString());
+                    continue;
+                  }
+                  if (line.startsWith("event:")) type = line.substring(6).stripLeading();
+                  if (line.startsWith("id:")) id = line.substring(3).stripLeading();
+                  if (line.startsWith("data:")) data.append(line.substring(5).stripLeading());
+                }
+              } catch (java.io.IOException error) {
+                throw new java.io.UncheckedIOException(error);
+              }
+            })
+        .get(5, java.util.concurrent.TimeUnit.SECONDS);
+  }
+
+  private HttpResponse<java.io.InputStream> connect(String cursor, String lastId) throws Exception {
+    var builder =
+        HttpRequest.newBuilder(
+            URI.create("http://localhost:" + port + "/api/v1/logs/stream?after=" + cursor));
+    if (lastId != null) builder.header("Last-Event-ID", lastId);
+    return client.send(builder.GET().build(), HttpResponse.BodyHandlers.ofInputStream());
+  }
+
+  @Test
+  void snapshotConnectionGapLiveDeliveryReconnectAndDuplicateAreSafe() throws Exception {
+    var first = liveEvent();
+    assertThat(post(first).statusCode()).isEqualTo(201);
+    var snapshot = tree(send("GET", "/live", null, ""));
+    String start = snapshot.get("cursor").asString();
+    assertThat(snapshot.get("items").size()).isEqualTo(1);
+    var late = liveEvent();
+    late.put("occurredAt", "2026-01-01T00:00:00Z");
+    assertThat(post(late).statusCode()).isEqualTo(201);
+    assertThat(post(late).statusCode()).isEqualTo(200);
+    String received;
+    var response = connect(start, null);
+    assertThat(response.statusCode()).isEqualTo(200);
+    assertThat(response.headers().firstValue("content-type").orElseThrow())
+        .contains("text/event-stream");
+    assertThat(response.headers().firstValue("cache-control").orElseThrow()).contains("no-store");
+    try (var input = response.body();
+        var reader =
+            new java.io.BufferedReader(
+                new java.io.InputStreamReader(input, java.nio.charset.StandardCharsets.UTF_8))) {
+      assertThat(frame(reader).event()).isEqualTo("ready");
+      var replay = frame(reader);
+      received = replay.id();
+      assertThat(json.readTree(replay.data()).get("item").get("eventId").asString())
+          .isEqualTo(late.get("eventId"));
+      var live = liveEvent();
+      post(live);
+      var pushed = frame(reader);
+      assertThat(json.readTree(pushed.data()).get("item").get("eventId").asString())
+          .isEqualTo(live.get("eventId"));
+      received = pushed.id();
+    }
+    // Pause closes the stream. Resume with the last processed ID, after a new stored event.
+    var paused = liveEvent();
+    post(paused);
+    var resumed = connect(start, received);
+    try (var input = resumed.body();
+        var reader =
+            new java.io.BufferedReader(
+                new java.io.InputStreamReader(input, java.nio.charset.StandardCharsets.UTF_8))) {
+      assertThat(json.readTree(frame(reader).data()).get("cursor").asString()).isEqualTo(received);
+      var pushed = frame(reader);
+      assertThat(json.readTree(pushed.data()).get("item").get("eventId").asString())
+          .isEqualTo(paused.get("eventId"));
+    }
+    assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM log_events", Integer.class)).isEqualTo(4);
+  }
+
+  @Test
+  void liveSnapshotIsBoundedAndReplayContinuesAcrossConnectionBudget() throws Exception {
+    var empty = tree(send("GET", "/live", null, ""));
+    String start = empty.get("cursor").asString();
+    assertThat(empty.get("from").asString()).matches(".*\\.\\d{3}Z");
+    var events = new ArrayList<Map<String, Object>>();
+    for (int i = 0; i < 129; i++) events.add(liveEvent());
+    for (int i = 0; i < events.size(); i += 100)
+      assertThat(
+              send(
+                      "POST",
+                      "/batch",
+                      json.writeValueAsString(events.subList(i, Math.min(i + 100, events.size()))),
+                      "application/json")
+                  .statusCode())
+          .isEqualTo(200);
+    var snapshot = tree(send("GET", "/live", null, ""));
+    assertThat(snapshot.get("items").size()).isEqualTo(50);
+    assertThat(snapshot.get("truncated").asBoolean()).isTrue();
+    var response = connect(start, null);
+    String received = start;
+    var ids = new java.util.HashSet<String>();
+    try (var input = response.body();
+        var reader =
+            new java.io.BufferedReader(
+                new java.io.InputStreamReader(input, java.nio.charset.StandardCharsets.UTF_8))) {
+      frame(reader);
+      for (int i = 0; i < 128; i++) {
+        var next = frame(reader);
+        received = next.id();
+        assertThat(next.event()).isEqualTo("log");
+        assertThat(ids.add(json.readTree(next.data()).get("item").get("eventId").asString()))
+            .isTrue();
+      }
+      assertThat(reader.readLine()).isNull();
+    }
+    var resumed = connect(received, null);
+    try (var input = resumed.body();
+        var reader =
+            new java.io.BufferedReader(
+                new java.io.InputStreamReader(input, java.nio.charset.StandardCharsets.UTF_8))) {
+      frame(reader);
+      var next = frame(reader);
+      assertThat(ids.add(json.readTree(next.data()).get("item").get("eventId").asString()))
+          .isTrue();
+    }
+    assertThat(ids).hasSize(129);
+  }
+
+  @Test
+  void liveRejectsBadCursorsAndUnknownParametersBeforeStartingStream() throws Exception {
+    String head = tree(send("GET", "/live", null, "")).get("cursor").asString();
+    String epoch = head.substring(0, head.indexOf(':'));
+    problem(send("GET", "/stream?after=invalid", null, ""), 400, "VALIDATION_ERROR");
+    problem(
+        send("GET", "/stream?after=" + head + "&after=" + head, null, ""), 400, "VALIDATION_ERROR");
+    problem(send("GET", "/live?from=x", null, ""), 400, "VALIDATION_ERROR");
+    problem(
+        send("GET", "/stream?after=" + epoch + ":9223372036854775807", null, ""),
+        409,
+        "LIVE_CURSOR_AHEAD");
+    problem(
+        send("GET", "/stream?after=00000000-0000-4000-8000-000000000000:0", null, ""),
+        409,
+        "LIVE_CURSOR_INVALID");
+  }
+
+  @Test
+  void concurrentCommitsHaveStableReplayOrderAndConflictsDoNotAdvanceHead() throws Exception {
+    String start = tree(send("GET", "/live", null, "")).get("cursor").asString();
+    var tasks = new ArrayList<CompletableFuture<HttpResponse<String>>>();
+    for (int i = 0; i < 8; i++) {
+      var value = liveEvent();
+      tasks.add(
+          CompletableFuture.supplyAsync(
+              () -> {
+                try {
+                  return post(value);
+                } catch (Exception e) {
+                  throw new RuntimeException(e);
+                }
+              }));
+    }
+    for (var task : tasks) assertThat(task.get().statusCode()).isEqualTo(201);
+    var sequences =
+        jdbc.queryForList(
+            "SELECT stream_sequence FROM log_events ORDER BY stream_sequence", Long.class);
+    long base = Long.parseLong(start.substring(start.indexOf(':') + 1));
+    assertThat(sequences)
+        .containsExactlyElementsOf(
+            java.util.stream.LongStream.rangeClosed(base + 1, base + 8).boxed().toList());
+    var id =
+        jdbc.queryForObject(
+            "SELECT event_id FROM log_events ORDER BY stream_sequence LIMIT 1", String.class);
+    var conflict = liveEvent();
+    conflict.put("eventId", id);
+    problem(post(conflict), 409, "EVENT_ID_CONFLICT");
+    assertThat(
+            jdbc.queryForObject(
+                "SELECT last_sequence FROM log_stream_state WHERE id=1", Long.class))
+        .isEqualTo(base + 8);
+  }
+
+  @Test
+  void pendingCommitCannotEscapeSnapshotThenAppearBehindCursor() throws Exception {
+    String before = tree(send("GET", "/live", null, "")).get("cursor").asString();
+    var value = liveEvent();
+    CompletableFuture<HttpResponse<String>> writer;
+    try (var connection = jdbc.getDataSource().getConnection()) {
+      connection.setAutoCommit(false);
+      try (var lock = connection.createStatement();
+          var ignored =
+              lock.executeQuery(
+                  "SELECT last_sequence FROM log_stream_state WHERE id=1 FOR UPDATE")) {
+        writer =
+            CompletableFuture.supplyAsync(
+                () -> {
+                  try {
+                    return post(value);
+                  } catch (Exception e) {
+                    throw new RuntimeException(e);
+                  }
+                });
+        var snapshot = tree(send("GET", "/live", null, ""));
+        assertThat(snapshot.get("cursor").asString()).isEqualTo(before);
+        assertThat(snapshot.get("items").size()).isZero();
+        connection.commit();
+      }
+    }
+    assertThat(writer.get(5, java.util.concurrent.TimeUnit.SECONDS).statusCode()).isEqualTo(201);
+    var response = connect(before, null);
+    try (var input = response.body();
+        var reader =
+            new java.io.BufferedReader(
+                new java.io.InputStreamReader(input, java.nio.charset.StandardCharsets.UTF_8))) {
+      frame(reader);
+      var next = frame(reader);
+      assertThat(json.readTree(next.data()).get("item").get("eventId").asString())
+          .isEqualTo(value.get("eventId"));
+    }
+  }
+
+  @Test
+  void liveSnapshotExcludesExpiredAndFutureButReplayAdvancesAcrossBoth() throws Exception {
+    String start = tree(send("GET", "/live", null, "")).get("cursor").asString();
+    var expired = liveEvent();
+    expired.put(
+        "occurredAt",
+        java.time.Instant.now()
+            .minusSeconds(86460)
+            .truncatedTo(java.time.temporal.ChronoUnit.MILLIS)
+            .toString());
+    var future = liveEvent();
+    future.put(
+        "occurredAt",
+        java.time.Instant.now()
+            .plusSeconds(60)
+            .truncatedTo(java.time.temporal.ChronoUnit.MILLIS)
+            .toString());
+    post(expired);
+    post(future);
+    assertThat(tree(send("GET", "/live", null, "")).get("items").size()).isZero();
+    var response = connect(start, null);
+    try (var input = response.body();
+        var reader =
+            new java.io.BufferedReader(
+                new java.io.InputStreamReader(input, java.nio.charset.StandardCharsets.UTF_8))) {
+      frame(reader);
+      assertThat(json.readTree(frame(reader).data()).get("item").get("eventId").asString())
+          .isEqualTo(expired.get("eventId"));
+      assertThat(json.readTree(frame(reader).data()).get("item").get("eventId").asString())
+          .isEqualTo(future.get("eventId"));
+    }
+  }
 }
