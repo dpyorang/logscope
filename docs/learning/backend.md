@@ -19,6 +19,7 @@
 | [SSE 실시간 로그와 저장 순서 기반 복구](#backend-sse-replay-20261028) | 2026-10-28 15:01 KST | 폴링 대신 서버 push를 선택하고 snapshot·재연결·중복·일시정지 후 replay의 백엔드 동작을 구현. 프론트 연결은 별도 작업. |
 | [SSE 최초 조회의 DB 연결 대기와 시간 경계 보정](#backend-sse-snapshot-clock-20261028) | 2026-10-28 15:15 KST | 연결 대기 중 저장된 로그가 cursor에만 포함되는 경쟁과 밀리초 종료 경계를 수정. 실제 MySQL 회귀 재현. |
 | [Elasticsearch 검색과 MySQL outbox 동기화](#backend-elasticsearch-search-20261028) | 2026-10-28 16:49 KST | Redis 없이 Nori 메시지 검색·정확한 필터와 영속 색인 재시도/복구 구현. 역색인·refresh·부분 실패와 테스트에서 배운 내용. |
+| [30초 이커머스 샘플 로그와 시나리오 선택](#backend-commerce-samples-20261028) | 2026-10-28 18:03 KST | 주문·결제·실재고·배송 20개 합성 상황, 레벨 구분과 수동 선택·예외 원인 체인 구현. |
 
 <a id="backend-foundation"></a>
 
@@ -633,3 +634,54 @@ keyword 필드는 정확한 값 필터·정렬에, text 필드는 분석 기반 
 - [자동 색인 작업자](../../src/main/java/com/logscope/log/LogSearchIndexer.java), [스케줄 연결](../../src/main/java/com/logscope/log/LogSearchScheduler.java), [원본과 작업 저장](../../src/main/java/com/logscope/log/LogStore.java), [V4](../../src/main/resources/db/migration/V4__log_search_outbox.sql)
 - [Nori 이미지](../../elasticsearch/Dockerfile), [이미지 통합 검사](../../scripts/verify-search.mjs), [입력/자원 단위 테스트](../../src/test/java/com/logscope/log/LogSearchTests.java), [프로토콜 단위 테스트](../../src/test/java/com/logscope/log/LogSearchClientTests.java), [실제 ES/MySQL 통합 테스트](../../src/test/java/com/logscope/log/LogSearchIntegrationTests.java)
 - [Elastic 릴리스](https://www.elastic.co/docs/release-notes/elasticsearch), [Nori](https://www.elastic.co/docs/reference/elasticsearch/plugins/analysis-nori), [refresh](https://www.elastic.co/docs/reference/elasticsearch/rest-apis/refresh-parameter)
+
+
+<a id="backend-commerce-samples-20261028"></a>
+
+## 주제: 30초 이커머스 샘플 로그와 시나리오 선택 / 시간: 2026-10-28 18:03 KST
+
+### 1. 사용자 요청과 목표
+
+프론트가 검색 연동 중이므로 영향이 적은 샘플 WAS를 개선해 달라는 요청이다. 기존 1분 랜덤 로그를 30초로 바꾸고 의류 쇼핑몰의 주문·결제·실재고 오류를 상세하게 나누어 실제 상황을 이해할 수 있는 메시지를 만든다. 메시지를 현실적으로 구성하는 작업이며 실제 쇼핑몰 주문·PG 연동·재고 변경 기능을 만드는 것은 아니다.
+
+### 2. 추가·변경한 내용
+
+두 WAS 모두 시작 30초 후부터 30초 간격으로 로그를 만든다. 스케줄러와 상태 응답은 동일한 `sample.interval-ms` 설정을 사용하고 화면은 응답의 간격을 표시한다. 자동 일시정지·재개와 기존 레벨별 수동 생성·랜덤·예외 로그 버튼은 유지했다.
+
+`CommerceScenarios`에20개 상황을 정의했다. 주문은 금액 계산·접수·중복 차단·가격 변경·저장 롤백·결제 상태 불일치, 결제는 경로 선택·승인·승인 거절·시간 초과·금액 불일치·환불 실패, 재고는 조회·예약 가능량 확인·예약·수량 부족·전산/실사 불일치·동시 차감 충돌, 배송은 출고 지연·창고 요청 실패다. TRACE2개·DEBUG2개·INFO3개·WARN5개·ERROR8개다.
+
+샘플 전용 `GET /api/scenarios`와 수동 요청의 선택 `scenario`를 추가했다. 화면에서 상황을 고르면 해당 레벨을 맞추고 레벨을 바꾸면 상황 선택을 초기화한다. 코드·레벨 불일치나 알 수 없는 코드는400이며, 기존처럼 코드 없이 레벨만 보내도 동작한다. 자동·랜덤 로그는 레벨을 먼저 균등 선택한 뒤 그 안의 상황을 균등 선택한다.
+
+메시지는 `[AUTO 또는 MANUAL] [합성][분야][오류코드] 상황: 합성 식별자, 수치, 원인과 결과/필요 조치`로 구성한다. ERROR 자동 로그에는 분야별 예외를 포함하며 결제 시간 초과는 `PaymentProcessingException → SocketTimeoutException` 원인 체인을 남긴다. 일반 수동 로그의 `exception=false` 의미는 보존했다. 중앙 로그 JSON 필드·검색·SSE·MySQL·Vector 설정은 유지했다.
+
+### 3. 선택 이유와 대안
+
+단순히 ERROR라고 적으면 어떤 실패인지, 어느 옵션이나 주문인지, 영향이 무엇인지 알기 어렵다. 고정 오류 코드와 사람이 읽는 한국어 설명을 함께 남겨 `결제 오류`, `환불`, `실재고` 같은 메시지 검색과 레벨·서버 필터를 확인할 수 있도록 했다. 합성 주문·의류 옵션·창고 식별자만 사용하고 실제 고객 정보·주소·결제 자격정보는 넣지 않는다.
+
+예상 가능한 결제 승인 거절·재고 부족·중복 요청 차단은 WARN, 작업 실패·정합성 불일치는 ERROR로 구분했다. 결제 승인 응답이 늦었다는 것만으로 실제 승인 실패를 단정할 수 없으므로, 시간 초과 메시지에는 `승인 여부 미확정`과 `중복 결제 방지를 위한 승인 조회 필요`를 기록한다. 재고 부족은 실재고에서 예약량을 뺀 판매가능수량과 요청량을 비교하고, 창고 실사와 전산 수량의 불일치는 별개 상황으로 구분한다.
+
+실제 결제·DB 실패를 유발하는 대신 합성 예외 객체를 로거에 전달한다. 프론트 연동과 공용 저장소에 부작용 없이 관측 데이터를 개선하기 위한 선택이다. 매30초 모든 오류를 한꺼번에 만드는 방식 대신 기존처럼 이벤트1개를 생성한다. 실제 업계의 발생 비율이나 장애 처리 성능을 나타내는 분포는 아니다.
+
+### 4. 동작 확인과 한계
+
+샘플 단위 테스트4개는 전체20개 코드의 유일성·메시지·레벨·JSON 형식·예외 유무·시간 초과 원인 체인, 잘못된 입력의 무기록, 일시정지·재개와 설정값에 따른 간격 표시를 확인한다. 기존 서버97개 테스트와 실제 MySQL/ES 테스트는 유지했다.
+
+실제 브라우저에서 두 WAS의 결제 시간 초과를 선택하고 예외 로그를 생성했다. 모든20개 상황을 두 WAS에서 생성해 Logback JSON 파일·Vector 배치·MySQL 상세까지 코드·레벨·메시지·예외 여부가 보존되는 것을 확인했다.30초 기본 설정·자동 로그, 파일 회전·단독 이벤트 전달·수집기 재시작·짧은 전송 실패 후 복구도 확인했다. 잘못된 코드·레벨 조합은 HTTP400이다.
+
+각 로그는 독립적인 합성 관측이다. 동일 예시 주문 ID가 등장해도 하나의 실제 주문이 순서대로 상태 전이하는 시뮬레이터가 아니며, 메시지 속 롤백·환불 대기·판매 보류가 실제로 실행된 것은 아니다. 예외 스택은 샘플 생성 경로를 보여 주며 실제 업무 코드의 실패 지점을 증명하지 않는다. 이미 구동 중인 외부 개발 컨테이너를 자동 재배포하지 않았다.
+
+### 5. 배운 개념과 남은 일
+
+로그 레벨은 메시지의 심각도를 나타내고, 오류 코드는 어떤 상황인지 반복해서 묶어 볼 수 있게 한다. 주문 식별자·상품 옵션·기대값과 실제값은 맥락이며, 예외 원인 체인은 상위 작업 실패와 하위 원인을 연결한다. 예외만 길게 출력하는 것보다 상황·원인·영향을 설명하는 메시지가 있어야 로그 탐색의 의미가 생긴다.
+
+현실적인 메시지와 현실적인 비즈니스 시뮬레이션은 다르다. 다음에 주문별 흐름을 추적하려면 요청/주문 상관관계와 상태 전이·장애 주입 모델을 별도로 설계해야 한다. 현재는 메시지 관측 개선에 범위를 한정한다. 공용 구조화 필드 추가·검색 분석기 변경·운영 장애 주입은 이번 작업에 포함하지 않는다.
+
+### 6. 관련 문서와 코드
+
+- [샘플 파일 로그·Vector 수집과 상황 목록](../sample-log-pipeline.md)
+- [이전 두 WAS·Vector 학습 기록](#backend-vector-samples-20261027)
+- [20개 이커머스 시나리오](../../sample-was/src/main/java/com/logscope/sample/CommerceScenarios.java)
+- [로그 생성과 예외 연결](../../sample-was/src/main/java/com/logscope/sample/EventGenerator.java)
+- [스케줄·상태·수동 API](../../sample-was/src/main/java/com/logscope/sample/SampleController.java)
+- [샘플 단위 테스트](../../sample-was/src/test/java/com/logscope/sample/SampleTests.java)
+- [실제 수집 파이프라인 검증](../../scripts/verify-sample-pipeline.mjs)
