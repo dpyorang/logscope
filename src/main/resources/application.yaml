@@ -31,3 +31,8 @@ management:
       group:
         readiness:
           include: readinessState,db
+
+logscope:
+  search:
+    enabled: ${SEARCH_ENABLED:false}
+    url: ${SEARCH_URL:http://elasticsearch:9200}

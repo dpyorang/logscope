@@ -8,7 +8,8 @@ import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
-@RestControllerAdvice(assignableTypes = {LogController.class, LogLiveController.class})
+@RestControllerAdvice(
+    assignableTypes = {LogController.class, LogLiveController.class, LogSearchController.class})
 class LogErrorHandler {
   @ExceptionHandler(LogApiException.class)
   ResponseEntity<Problem> api(LogApiException error) {

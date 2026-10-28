@@ -21,7 +21,7 @@ class LogscopeApplicationTests {
   @Test
   void contextLoads() {
     assertThat(jdbc.queryForObject("SELECT 1", Integer.class)).isEqualTo(1);
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("3");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("4");
     assertThat(flyway.validateWithResult().validationSuccessful).isTrue();
     flyway.migrate();
     assertThat(flyway.info().pending()).isEmpty();
