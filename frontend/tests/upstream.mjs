@@ -43,7 +43,7 @@ function json(res, value, status = 200, type = "application/json") {
   res.writeHead(status, { "Content-Type": type });
   res.end(JSON.stringify(value));
 }
-function problem(res, status, code) {
+function problem(res, status, code, errors = []) {
   if (mode === "unavailable") res.setHeader("Retry-After", "3");
   json(
     res,
@@ -52,7 +52,7 @@ function problem(res, status, code) {
       title: code,
       status,
       code,
-      errors: [],
+      errors,
       detail: "sensitive upstream detail must not leak",
     },
     status,
@@ -179,6 +179,68 @@ const server = http.createServer(async (req, res) => {
       nextCursor: null,
       previousCursor: null,
     });
+  }
+  if (url.pathname === "/api/v1/logs/search") {
+    if (mode === "search-unavailable")
+      return problem(res, 503, "SEARCH_UNAVAILABLE");
+    if (mode === "search-rebuilding")
+      return problem(res, 503, "SEARCH_INDEX_REBUILDING");
+    if (mode === "search-capacity")
+      return problem(res, 503, "SEARCH_CAPACITY_EXCEEDED");
+    if (mode === "search-validation")
+      return problem(res, 400, "VALIDATION_ERROR", [
+        { field: "keyword", code: "TOO_LONG" },
+      ]);
+    if (mode === "search-timeout") return;
+    if (mode === "search-malformed") return json(res, { items: [] });
+    const query = url.searchParams;
+    const size = Number(query.get("size") || 50);
+    let items =
+      mode === "search-truncated"
+        ? Array.from({ length: 51 }, (_, i) => ({
+            ...item(`7b2a8c30-8d94-4d5f-a6d8-${String(i).padStart(12, "0")}`),
+            hasException: false,
+          }))
+        : [
+            { ...item(), hasException: true },
+            { ...item(other), hasException: false },
+            ...history.map((entry) => entry.item),
+          ];
+    items = items.filter(
+      (entry) =>
+        entry.occurredAt >= query.get("from") &&
+        entry.occurredAt < query.get("to") &&
+        (!query.has("level") || entry.level === query.get("level")) &&
+        (!query.has("instanceId") ||
+          entry.instanceId === query.get("instanceId")),
+    );
+    // 키워드 매칭은 실제 ES 통합 검사에서 검증한다. 이 서버는 응답 상태를 제어한다.
+    if (mode === "search-empty" || mode === "search-empty-pending") items = [];
+    items.sort(
+      (a, b) =>
+        b.occurredAt.localeCompare(a.occurredAt) ||
+        b.eventId.localeCompare(a.eventId),
+    );
+    const pending =
+      mode === "search-pending" || mode === "search-empty-pending";
+    const result = {
+      items: items.slice(0, size),
+      size,
+      truncated: items.length > size,
+      synchronization: {
+        pendingCount: pending ? 3 : 0,
+        retryingCount: pending ? 1 : 0,
+        indexingPending: pending,
+      },
+    };
+    if (mode === "search-wrong-level")
+      result.items = [{ ...item(), hasException: true, level: "TRACE" }];
+    if (mode === "search-bad-sync") result.synchronization.retryingCount = 10;
+    if (mode === "search-slow")
+      return setTimeout(() => json(res, result), 6000);
+    if (mode === "search-delay")
+      return setTimeout(() => json(res, result), 900);
+    return json(res, result);
   }
   if (url.pathname.startsWith("/api/v1/logs/")) {
     const eventId = url.pathname.split("/").at(-1);
