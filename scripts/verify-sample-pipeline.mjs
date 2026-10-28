@@ -182,6 +182,15 @@ try {
       .locator("#instance")
       .filter({ hasText: `was-${sample.i}` })
       .waitFor();
+    assert.equal(
+      (await (await fetch(`${sample.url}/api/status`)).json()).intervalSeconds,
+      30,
+    );
+    await page
+      .locator('#scenario option[value="PAYMENT_TIMEOUT"]')
+      .waitFor({ state: "attached" });
+    await page.locator("#scenario").selectOption("PAYMENT_TIMEOUT");
+    assert.equal(await page.locator("#level").inputValue(), "ERROR");
     await page.locator("#exception").click();
     await page.locator("#recent li").first().waitFor();
     const text = await page.locator("#recent li").first().textContent();
@@ -205,6 +214,37 @@ try {
       );
     await page.close();
   }
+  const scenarioIds = [];
+  for (const sample of samples) {
+    const catalog = await (await fetch(`${sample.url}/api/scenarios`)).json();
+    assert.equal(catalog.length, 20);
+    for (const scenario of catalog) {
+      const generated = await post(`${sample.url}/api/events`, {
+        level: scenario.level,
+        exception: scenario.level === "ERROR",
+        scenario: scenario.code,
+      });
+      ids.push(generated.eventId);
+      scenarioIds.push({
+        id: generated.eventId,
+        scenario,
+        instanceId: `was-${sample.i}`,
+      });
+    }
+    for (const input of [
+      { level: "ERROR", scenario: "UNKNOWN" },
+      { level: "INFO", scenario: "PAYMENT_TIMEOUT" },
+      { level: "RANDOM", scenario: "PAYMENT_TIMEOUT" },
+      { level: "WARN", exception: true },
+    ]) {
+      const invalid = await fetch(`${sample.url}/api/events`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+      });
+      assert.equal(invalid.status, 400);
+    }
+  }
   for (const sample of samples)
     assert.match(
       docker(["exec", sample.was, "sh", "-c", "ls /logs/events.*.jsonl"]),
@@ -221,6 +261,17 @@ try {
     async () => (await Promise.all(ids.map(stored))).every(Boolean),
     "Manual/rolled log did not reach MySQL",
   );
+  for (const { id, scenario, instanceId } of scenarioIds) {
+    const detail = await (await fetch(`${api}/api/v1/logs/${id}`)).json();
+    assert.equal(detail.instanceId, instanceId);
+    assert.equal(detail.level, scenario.level);
+    assert.ok(detail.message.includes(`[${scenario.code}]`));
+    assert.ok(detail.message.includes("[합성]"));
+    assert.equal(
+      typeof detail.exception === "string",
+      scenario.level === "ERROR",
+    );
+  }
   for (const sample of samples)
     await post(`${sample.url}/api/automatic`, { enabled: false });
   // Regression: isolated low-volume events must arrive without another event waking the sink.
@@ -248,7 +299,13 @@ try {
     const detail = await (await fetch(`${api}/api/v1/logs/${id}`)).json();
     assert.equal(detail.instanceId, `was-${index + 1}`);
     assert.equal(detail.level, "ERROR");
-    assert.match(detail.exception, /Synthetic sample failure/);
+    assert.match(detail.message, /\[합성\]/);
+    assert.match(
+      detail.message,
+      /PAYMENT_TIMEOUT.*결제 오류.*승인 여부 미확정/,
+    );
+    assert.match(detail.exception, /PaymentProcessingException/);
+    assert.match(detail.exception, /SocketTimeoutException/);
   }
   await until(
     async () => {
@@ -262,8 +319,8 @@ try {
           ),
       );
     },
-    "Default 60-second automatic logs did not arrive",
-    85000,
+    "Default 30-second automatic logs did not arrive",
+    55000,
   );
   for (const sample of samples)
     await post(`${sample.url}/api/automatic`, { enabled: false });
@@ -299,7 +356,7 @@ try {
     JSON.stringify(isolatedLatencies),
   );
   console.log(
-    "Two WAS UI/manual/all-level/exception/60s automatic → Logback rotation → Vector JSON batch/checkpoint/retry → real MySQL integration passed.",
+    "Two WAS UI/manual/all-level/commerce scenarios/exception/30s automatic → Logback rotation → Vector JSON batch/checkpoint/retry → real MySQL integration passed.",
   );
 } catch (error) {
   // Emit only status counts, never raw diagnostic headers, addresses, or payloads.

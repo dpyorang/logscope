@@ -2,6 +2,7 @@ spring:
   application:
     name: sample-was
 sample:
+  interval-ms: 30000
   instance-id: ${INSTANCE_ID:was-1}
 server:
   shutdown: graceful

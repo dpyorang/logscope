@@ -29,12 +29,20 @@
   </style>
   <h1>샘플 WAS <span id="instance"></span></h1>
   <p>
-    각 WAS가 1분마다 랜덤 로그를 파일에 기록합니다. Vector가 파일을 읽어
-    logscope로 전송합니다.
+    각 WAS가 30초마다 랜덤 레벨의 이커머스 합성 로그를 파일에 기록합니다.
+    Vector가 파일을 읽어 logscope로 전송합니다.
+  </p>
+  <p>
+    실제 주문·결제·재고 처리는 수행하지 않습니다. 모든 식별자와 상황은 합성
+    데이터입니다.
   </p>
   <p id="auto"></p>
   <button id="toggle" disabled>자동 생성 전환</button>
   <form id="generate">
+    <label for="scenario">이커머스 상황</label>
+    <select id="scenario">
+      <option value="">선택 레벨에서 랜덤</option>
+    </select>
     <label for="level">로그 레벨</label
     ><select id="level">
       <option>INFO</option>
@@ -44,7 +52,7 @@
       <option>ERROR</option>
       <option value="RANDOM">랜덤</option></select
     ><button id="create">로그 생성</button
-    ><button type="button" id="exception">예외 발생</button>
+    ><button type="button" id="exception">ERROR 예외 로그 생성</button>
   </form>
   <p id="notice" role="status" aria-live="polite"></p>
   <h2>최근 수동 생성 결과</h2>
