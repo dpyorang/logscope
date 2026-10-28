@@ -1,4 +1,5 @@
 import "server-only";
+import { snapshot, type Snapshot } from "../live";
 import { readFile } from "node:fs/promises";
 import {
   detail,
@@ -15,13 +16,24 @@ import {
 const DEADLINE = 5000;
 const CODES: Record<string, number> = {
   VALIDATION_ERROR: 400,
+  LIVE_CURSOR_INVALID: 409,
+  LIVE_CURSOR_AHEAD: 409,
+  LIVE_CAPACITY_EXCEEDED: 503,
   LOG_NOT_FOUND: 404,
   INTERNAL_ERROR: 500,
   STORAGE_UNAVAILABLE: 503,
   QUERY_FEATURE_NOT_IMPLEMENTED: 501,
   PAGINATION_NOT_IMPLEMENTED: 501,
 };
-const FIELDS = new Set(["from", "to", "size", "eventId", "query"]);
+const FIELDS = new Set([
+  "from",
+  "to",
+  "size",
+  "eventId",
+  "query",
+  "after",
+  "Last-Event-ID",
+]);
 const FIELD_CODES = new Set([
   "REQUIRED",
   "INVALID_FORMAT",
@@ -30,7 +42,7 @@ const FIELD_CODES = new Set([
   "UNKNOWN_FIELD",
   "DUPLICATE_PARAMETER",
 ]);
-async function baseUrl(): Promise<URL> {
+export async function baseUrl(): Promise<URL> {
   const direct = process.env.LOGSCOPE_API_BASE_URL;
   const file = process.env.LOGSCOPE_API_BASE_URL_FILE;
   if (!!direct === !!file) throw new Error("configuration");
@@ -47,7 +59,7 @@ async function baseUrl(): Promise<URL> {
     throw new Error("configuration");
   return url;
 }
-async function boundedJson(
+export async function boundedJson(
   response: Response,
   limit: number,
 ): Promise<unknown> {
@@ -83,7 +95,7 @@ async function boundedJson(
     throw new Error("invalid");
   }
 }
-function problem(value: unknown, status: number): Problem | null {
+export function problem(value: unknown, status: number): Problem | null {
   if (
     !record(value) ||
     value.status !== status ||
@@ -181,6 +193,15 @@ export function loadDetail(id: string, signal?: AbortSignal) {
     `/api/v1/logs/${id}`,
     (value): value is Detail => detail(value) && value.eventId === id,
     1024 * 1024,
+    signal,
+  );
+}
+
+export function loadSnapshot(signal?: AbortSignal) {
+  return query<Snapshot>(
+    "/api/v1/logs/live",
+    snapshot,
+    8 * 1024 * 1024,
     signal,
   );
 }

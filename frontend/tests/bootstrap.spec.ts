@@ -27,15 +27,15 @@ test("JavaScript 없이 SSR 목록을 제공하고 브라우저 준비만으로 
   await expect(
     page.getByRole("button", { name: /was-2.*상세 보기/ }),
   ).toBeVisible();
+  await expect(page.getByText("실시간 연결됨", { exact: true })).toBeVisible();
   const state = await (
     await request.get("http://127.0.0.1:3102/control")
   ).json();
-  expect(state.calls).toHaveLength(1);
-  const initial = new URL(state.calls[0], "http://localhost");
   expect(
-    Date.parse(initial.searchParams.get("to")!) -
-      Date.parse(initial.searchParams.get("from")!),
-  ).toBe(86_400_000);
+    state.calls.filter((path: string) => path === "/api/v1/logs/live"),
+  ).toHaveLength(1);
+  expect(state.streams).toHaveLength(1);
+  expect(state.streams[0]).toContain("after=c0");
   await expect(
     page.getByText("최근 24시간 · 최신순 · 최대 50건"),
   ).toBeVisible();
@@ -43,18 +43,11 @@ test("JavaScript 없이 SSR 목록을 제공하고 브라우저 준비만으로 
   await expect
     .poll(
       async () =>
-        (await (await request.get("http://127.0.0.1:3102/control")).json())
-          .calls.length,
+        (
+          await (await request.get("http://127.0.0.1:3102/control")).json()
+        ).calls.filter((path: string) => path === "/api/v1/logs/live").length,
     )
     .toBe(2);
-  const refreshed = await (
-    await request.get("http://127.0.0.1:3102/control")
-  ).json();
-  const next = new URL(refreshed.calls[1], "http://localhost");
-  expect(
-    Date.parse(next.searchParams.get("to")!) -
-      Date.parse(next.searchParams.get("from")!),
-  ).toBe(86_400_000);
 
   const html = await (await request.get("/")).text();
   expect(html).not.toContain("127.0.0.1:3102");
@@ -96,7 +89,7 @@ test("키보드 상세 열기·원문·복사·닫기와 모바일 배치를 제
     page.getByText("이 로그에는 stack trace가 없습니다."),
   ).toBeVisible();
 });
-test("초기 0건과 실패를 구분하고 실패 재시도는 같은 절대 범위를 사용한다", async ({
+test("초기 0건과 실패를 구분하고 실패 후 새 snapshot을 다시 조회한다", async ({
   request,
   page,
 }) => {
@@ -111,16 +104,16 @@ test("초기 0건과 실패를 구분하고 실패 재시도는 같은 절대 �
   const before = await (
     await request.get("http://127.0.0.1:3102/control")
   ).json();
-  const expected = before.calls[0];
+  expect(before.calls[0]).toBe("/api/v1/logs/live");
   await mode(request, "normal");
-  await page.getByRole("button", { name: "같은 범위로 다시 시도" }).click();
+  await page.getByRole("button", { name: "목록 다시 조회" }).click();
   await expect(
     page.getByRole("button", { name: /was-2.*상세 보기/ }),
   ).toBeVisible();
   const after = await (
     await request.get("http://127.0.0.1:3102/control")
   ).json();
-  expect(after.calls).toEqual([expected]);
+  expect(after.calls[0]).toBe("/api/v1/logs/live");
 });
 test("재조회 실패는 기존 목록과 상세를 유지하며 상세 404·잘못된 원문을 구분한다", async ({
   request,
@@ -135,6 +128,9 @@ test("재조회 실패는 기존 목록과 상세를 유지하며 상세 404·�
     page.getByText("이전 조회 결과를 표시하고 있습니다."),
   ).toBeVisible();
   await expect(page.getByLabel("Stack trace 원문")).toBeVisible();
+  await expect(
+    page.getByText(/서버가 재시도 대기를 요청했습니다/),
+  ).toBeVisible();
   await mode(request, "missing");
   await page.getByRole("button", { name: /was-1.*상세 보기/ }).click();
   await expect(page.getByText(/선택한 로그를 찾을 수 없습니다/)).toBeVisible();
@@ -191,16 +187,22 @@ test("중계는 고정 GET·시각 조건만 받고 오류·과대·잘못된 �
   await mode(request, "wrong-id");
   expect((await request.get(`/api/logs/${id}`)).status()).toBe(502);
 });
-test("최소 백엔드의 50건 초과를 빈 목록으로 숨기지 않는다", async ({
+test("정적 API의 50건 초과 오류를 유지하고 실시간 snapshot은 최신 50건 제한을 안내한다", async ({
   request,
   page,
 }) => {
   await mode(request, "pagination");
+  const response = await request.get(
+    "/api/logs?from=2026-10-27T03:00:00.000Z&to=2026-10-28T03:00:00.000Z",
+  );
+  expect(response.status()).toBe(501);
+  expect((await response.json()).code).toBe("PAGINATION_NOT_IMPLEMENTED");
+  await mode(request, "truncated");
   await page.goto("/");
-  await expect(page.getByText(/로그가 50건을 초과했습니다/)).toBeVisible();
+  await expect(page.locator("tbody tr")).toHaveCount(50);
   await expect(
-    page.getByRole("heading", { name: "조회 범위에 로그가 없습니다" }),
-  ).toHaveCount(0);
+    page.getByText("최신 50건만 표시합니다.", { exact: false }),
+  ).toBeVisible();
 });
 test("생존 확인과 정적 자산을 제공한다", async ({ request }) => {
   const r = await request.get("/health/live");
@@ -266,6 +268,7 @@ test("공통 화면 틀은 로그 탐색만 제공하고 메뉴 이동으로 조
   const link = nav.getByRole("link", { name: "로그 탐색" });
   await expect(link).toHaveAttribute("aria-current", "page");
   await page.getByRole("button", { name: /was-2.*상세 보기/ }).click();
+  await page.getByRole("button", { name: "일시정지", exact: true }).click();
   const range = await page.locator(".query-info").textContent();
   await link.click();
   await expect(page.getByRole("main")).toBeFocused();

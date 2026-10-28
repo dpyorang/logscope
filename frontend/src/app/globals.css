@@ -619,3 +619,40 @@ button {
 .workspace-shell td:last-child button {
   white-space: nowrap;
 }
+
+.live-controls {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 0;
+}
+.live-state {
+  min-width: 0;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+.live-state strong {
+  color: #26477f;
+}
+.live-state p {
+  margin: 4px 0;
+}
+.live-controls button {
+  flex-shrink: 0;
+}
+.limit-notice {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.table-scroll {
+  overflow-anchor: none;
+}
+@media (max-width: 600px) {
+  .live-controls {
+    flex-wrap: wrap;
+  }
+}
