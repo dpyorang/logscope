@@ -1,77 +1,107 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   detail,
   displayTime,
   failure,
   guidance,
-  listing,
-  recentRange,
-  record,
   type Detail,
-  type Listing,
   type Range,
   type Result,
 } from "@/lib/logs";
 
+import { LiveStore, read } from "@/lib/live-store";
+import type { Snapshot } from "@/lib/live";
+
 type Selection = { id: string; result: Result<Detail> | null };
-async function read<T>(
-  url: string,
-  valid: (value: unknown) => value is T,
-  signal: AbortSignal,
-): Promise<Result<T>> {
-  try {
-    const response = await fetch(url, { cache: "no-store", signal });
-    const value: unknown = await response.json();
-    if (response.ok)
-      return valid(value)
-        ? { ok: true, data: value }
-        : failure(502, "UPSTREAM_INVALID_RESPONSE");
-    return record(value) && typeof value.code === "string"
-      ? {
-          ok: false,
-          problem: {
-            status: response.status,
-            code: value.code,
-            errors: [],
-            ...(response.headers.get("retry-after")
-              ? { retryAfter: response.headers.get("retry-after")! }
-              : {}),
-          },
-        }
-      : failure(502, "UPSTREAM_INVALID_RESPONSE");
-  } catch {
-    return signal.aborted
-      ? failure(499, "REQUEST_CANCELLED")
-      : failure(502, "UPSTREAM_UNAVAILABLE");
-  }
-}
 export function LogExplorer({
   initialRange,
   initialResult,
   initialSuccessAt,
 }: {
   initialRange: Range;
-  initialResult: Result<Listing>;
+  initialResult: Result<Snapshot>;
   initialSuccessAt: string | null;
 }) {
-  const [result, setResult] = useState(initialResult);
-  const [range, setRange] = useState(initialRange);
-  const [successAt, setSuccessAt] = useState(initialSuccessAt);
-  const [listError, setListError] = useState<{
-    range: Range;
-    code: string;
-    retryAfter?: string;
-  } | null>(
-    initialResult.ok ? null : { range: initialRange, ...initialResult.problem },
+  const [store] = useState(
+    () => new LiveStore(initialResult, initialRange, initialSuccessAt),
   );
-  const [busy, setBusy] = useState(false);
+  const reading = useRef<{
+    element: HTMLElement | null;
+    top: number;
+    y: number;
+    x: number;
+    left: number;
+    focus: HTMLElement | null;
+  } | null>(null);
+  const table = useRef<HTMLDivElement | null>(null);
+  const subscribe = useCallback(
+    (listener: () => void) =>
+      store.subscribe(() => {
+        if (!reading.current) {
+          const detail = document.querySelector<HTMLElement>(
+            ".detail-panel .trace, .detail-panel .message-full",
+          );
+          const bounds = detail?.getBoundingClientRect();
+          const anchor =
+            detail && bounds && bounds.bottom > 80 && bounds.top < innerHeight
+              ? detail
+              : (Array.from(
+                  document.querySelectorAll<HTMLElement>("tbody tr"),
+                ).find((row) => {
+                  const bounds = row.getBoundingClientRect();
+                  return bounds.bottom > 80 && bounds.top < innerHeight;
+                }) ?? null);
+          reading.current = {
+            element: anchor,
+            top: anchor?.getBoundingClientRect().top ?? 0,
+            y: scrollY,
+            x: scrollX,
+            left: table.current?.scrollLeft ?? 0,
+            focus:
+              document.activeElement instanceof HTMLElement
+                ? document.activeElement
+                : null,
+          };
+        }
+        listener();
+      }),
+    [store],
+  );
+  const state = useSyncExternalStore(
+    subscribe,
+    store.getSnapshot,
+    store.getServerSnapshot,
+  );
+  const { result, range, successAt, busy, refreshError: listError } = state;
+  useEffect(() => {
+    store.start();
+    return () => store.stop();
+  }, [store]);
+  useLayoutEffect(() => {
+    const previous = reading.current;
+    if (!previous) return;
+    reading.current = null;
+    if (table.current) table.current.scrollLeft = previous.left;
+    const shift = previous.element?.isConnected
+      ? previous.element.getBoundingClientRect().top - previous.top
+      : 0;
+    window.scrollTo(previous.x, previous.y + shift);
+    if (previous.focus && !previous.focus.isConnected)
+      listHeading.current?.focus({ preventScroll: true });
+  }, [state]);
   const [selection, setSelection] = useState<Selection | null>(null);
   const [wrap, setWrap] = useState(true);
   const [copyState, setCopyState] = useState("");
-  const listController = useRef<AbortController | null>(null);
   const detailController = useRef<AbortController | null>(null);
   const detailVersion = useRef(0);
   const lastTrigger = useRef<HTMLButtonElement | null>(null);
@@ -84,18 +114,13 @@ export function LogExplorer({
   }, [selectedId]);
   useEffect(
     () => () => {
-      listController.current?.abort();
       detailController.current?.abort();
       detailVersion.current += 1;
-      listController.current = null;
     },
     [],
   );
 
-  async function queryList(nextRange: Range) {
-    listController.current?.abort();
-    const controller = new AbortController();
-    listController.current = controller;
+  async function queryList() {
     detailController.current?.abort();
     detailVersion.current += 1;
     setSelection((previous) =>
@@ -106,34 +131,12 @@ export function LogExplorer({
           }
         : previous,
     );
-    setBusy(true);
-    const timer = setTimeout(() => controller.abort(), 8000);
-    const next = await read(
-      `/api/logs?${new URLSearchParams(nextRange)}`,
-      listing,
-      controller.signal,
-    );
-    clearTimeout(timer);
-    if (listController.current !== controller) return;
-    setBusy(false);
-    if (next.ok) {
-      const restore = panel.current?.contains(document.activeElement);
-      setResult(next);
-      setRange(nextRange);
-      setSuccessAt(new Date().toISOString());
-      setListError(null);
+    const restore = panel.current?.contains(document.activeElement);
+    if (await store.refresh()) {
       setSelection(null);
       setCopyState("");
       if (restore) requestAnimationFrame(() => listHeading.current?.focus());
-    } else
-      setListError({
-        range: nextRange,
-        ...next.problem,
-        code:
-          next.problem.code === "REQUEST_CANCELLED"
-            ? "UPSTREAM_TIMEOUT"
-            : next.problem.code,
-      });
+    }
   }
   async function queryDetail(id: string, trigger?: HTMLButtonElement) {
     if (trigger) lastTrigger.current = trigger;
@@ -224,7 +227,7 @@ export function LogExplorer({
               <button
                 className="primary-button"
                 disabled={busy}
-                onClick={() => queryList(recentRange())}
+                onClick={() => queryList()}
               >
                 {busy ? "조회 중…" : "새로고침"}
               </button>
@@ -241,7 +244,7 @@ export function LogExplorer({
               <p>
                 {successAt ? (
                   <>
-                    마지막 성공 조회
+                    마지막 목록 조회 성공
                     <br />
                     <time>{displayTime(successAt)}</time>
                   </>
@@ -250,6 +253,60 @@ export function LogExplorer({
                 )}
               </p>
             </div>
+            <div className="live-controls">
+              <div className="live-state" role="status" aria-live="polite">
+                <strong>
+                  {
+                    {
+                      waiting: "실시간 연결 대기",
+                      connecting: "실시간 연결 중",
+                      live: "실시간 연결됨",
+                      reconnecting: "실시간 재연결 중",
+                      error: "실시간 연결 실패",
+                      "needs-refresh": "새 목록 조회 필요",
+                      paused: "실시간 일시정지",
+                    }[state.phase]
+                  }
+                </strong>
+                <p>
+                  {state.pausedAt
+                    ? `정지 시각: ${displayTime(state.pausedAt)}`
+                    : state.phase === "needs-refresh"
+                      ? "기존 결과를 보존했습니다. 이어받기 요청을 계속할 수 없어 새로고침으로 최신 목록을 조회해야 합니다."
+                      : state.phase === "error"
+                        ? "기존 결과를 보존하고 다시 연결합니다. 연결 중단이 로그 저장 중단이나 유실을 뜻하지는 않습니다."
+                        : state.phase === "waiting"
+                          ? "목록 조회에 성공하면 실시간 연결을 시작합니다."
+                          : state.phase === "connecting"
+                            ? "마지막 처리 위치에서 실시간 연결을 시작하고 있습니다."
+                            : state.phase === "reconnecting"
+                              ? "연결을 갱신하고 마지막 처리 위치부터 이어받습니다."
+                              : "새 로그가 없어도 연결은 유지됩니다. 최근 24시간 범위는 자동으로 이동합니다."}
+                </p>
+                <p>
+                  마지막 정상 실시간 로그 수신:{" "}
+                  {state.liveAt
+                    ? displayTime(state.liveAt)
+                    : "아직 수신한 로그가 없습니다"}
+                </p>
+                <p>
+                  실시간으로 추가된 로그 {state.newCount}건 · 목록은 최신
+                  50건까지 표시
+                </p>
+              </div>
+              <button
+                disabled={busy}
+                onClick={state.paused ? store.resume : store.pause}
+              >
+                {state.paused ? "실시간 재개" : "일시정지"}
+              </button>
+            </div>
+            {result.ok && result.data.truncated && (
+              <p className="limit-notice">
+                최신 50건만 표시합니다. 화면에서 빠진 로그를 포함한 전체 이력
+                보기를 뜻하지 않습니다.
+              </p>
+            )}
             <p className="query-status" role="status" aria-live="polite">
               {busy
                 ? "목록을 갱신하고 있습니다. 기존 결과는 이전 조회 결과입니다."
@@ -261,21 +318,14 @@ export function LogExplorer({
               <div className="error-notice" role="alert">
                 <strong>{guidance(listError.code)}</strong>
                 {result.ok && <p>이전 조회 결과를 표시하고 있습니다.</p>}
-                <p>
-                  실패한 조회 범위: {displayTime(listError.range.from)} ~{" "}
-                  {displayTime(listError.range.to)}
-                </p>
                 {listError.retryAfter && (
                   <p>
                     서버가 재시도 대기를 요청했습니다. 잠시 후 다시 시도해
                     주세요.
                   </p>
                 )}
-                <button
-                  disabled={busy}
-                  onClick={() => queryList(listError.range)}
-                >
-                  같은 범위로 다시 시도
+                <button disabled={busy} onClick={() => queryList()}>
+                  목록 다시 조회
                 </button>
               </div>
             )}
@@ -292,13 +342,14 @@ export function LogExplorer({
                   <div className="empty-state">
                     <h3>조회 범위에 로그가 없습니다</h3>
                     <p>
-                      최근 24시간에 발생한 로그만 표시합니다. 로그를 새로 전송한
-                      뒤 새로고침해 주세요.
+                      최근 24시간에 발생한 로그만 표시합니다. 실시간 연결 중이면
+                      새 로그를 기다립니다.
                     </p>
                   </div>
                 )}
                 {result.ok && result.data.items.length > 0 && (
                   <div
+                    ref={table}
                     className="table-scroll"
                     tabIndex={0}
                     role="region"
@@ -321,6 +372,7 @@ export function LogExplorer({
                         {result.data.items.map((item) => (
                           <tr
                             key={item.eventId}
+                            data-event-id={item.eventId}
                             className={
                               selection?.id === item.eventId ? "selected" : ""
                             }
