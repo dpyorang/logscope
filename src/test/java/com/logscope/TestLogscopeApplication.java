@@ -1,5 +1,6 @@
 package com.logscope;
 
+import com.logscope.config.TestcontainersConfiguration;
 import org.springframework.boot.SpringApplication;
 
 public class TestLogscopeApplication {

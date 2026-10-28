@@ -20,6 +20,7 @@
 | [SSE 최초 조회의 DB 연결 대기와 시간 경계 보정](#backend-sse-snapshot-clock-20261028) | 2026-10-28 15:15 KST | 연결 대기 중 저장된 로그가 cursor에만 포함되는 경쟁과 밀리초 종료 경계를 수정. 실제 MySQL 회귀 재현. |
 | [Elasticsearch 검색과 MySQL outbox 동기화](#backend-elasticsearch-search-20261028) | 2026-10-28 16:49 KST | Redis 없이 Nori 메시지 검색·정확한 필터와 영속 색인 재시도/복구 구현. 역색인·refresh·부분 실패와 테스트에서 배운 내용. |
 | [30초 이커머스 샘플 로그와 시나리오 선택](#backend-commerce-samples-20261028) | 2026-10-28 18:03 KST | 주문·결제·실재고·배송 20개 합성 상황, 레벨 구분과 수동 선택·예외 원인 체인 구현. |
+| [백엔드 기능별 내부 계층과 메서드 설명 규칙](#backend-feature-layers-20261028) | 2026-10-28 19:02 KST | 중앙·샘플 코드를 계층별로 분리하고 API/메서드 Javadoc·경로별 규칙·구조 회귀 검사를 추가. |
 
 <a id="backend-foundation"></a>
 
@@ -325,7 +326,7 @@ DATETIME(3)·UTC LocalDateTime 변환으로 JVM 기본 시간대에 의존하지
 
 - [이전 설계·학습 기록](#backend-foundation), [공통 기록 형식](../learning-record-format.md).
 - [API 명세와 현재 구현 범위](../contracts/log-api-draft.md), [기능별 진행](../feature-development-workflow.md).
-- [컨트롤러](../../src/main/java/com/logscope/log/LogController.java), [저장소](../../src/main/java/com/logscope/log/LogStore.java), [V2 migration](../../src/main/resources/db/migration/V2__create_log_events.sql).
+- [컨트롤러](../../src/main/java/com/logscope/log/controller/LogController.java), [저장소](../../src/main/java/com/logscope/log/repository/LogRepository.java), [V2 migration](../../src/main/resources/db/migration/V2__create_log_events.sql).
 - [HTTP·MySQL 테스트](../../src/test/java/com/logscope/LogApiTests.java).
 
 <a id="backend-loginput-unit-20261027"></a>
@@ -369,7 +370,7 @@ LogInputTests는 Spring 컨텍스트·HTTP 서버·MySQL·Docker 없이 LogInput
 
 ### 6. 관련 문서와 코드
 
-- [LogInput 단위 테스트](../../src/test/java/com/logscope/log/LogInputTests.java), [입력 검증](../../src/main/java/com/logscope/log/LogInput.java), [오류 정의](../../src/main/java/com/logscope/log/LogApiException.java).
+- [LogInput 단위 테스트](../../src/test/java/com/logscope/log/validation/LogInputTests.java), [입력 검증](../../src/main/java/com/logscope/log/validation/LogInput.java), [오류 정의](../../src/main/java/com/logscope/log/exception/LogApiException.java).
 - [기존 HTTP·MySQL 테스트](../../src/test/java/com/logscope/LogApiTests.java), [API 명세](../contracts/log-api-draft.md), [작업 규칙](../../AGENTS.md).
 - [이전 저장·조회 학습](#backend-ingest-read-20261027). 기존 설계 설명은 당시 기록이며 이 항목의 테스트 구현과 구분한다.
 
@@ -413,10 +414,10 @@ Logback은 애플리케이션의 로그를 파일에 남기고 Vector는 그 파
 
 - [샘플 파이프라인과 실행·한계](../sample-log-pipeline.md)
 - [API 명세](../contracts/log-api-draft.md), [아키텍처](../architecture.md)
-- [샘플 생성 코드](../../sample-was/src/main/java/com/logscope/sample/EventGenerator.java), [JSON encoder](../../sample-was/src/main/java/com/logscope/sample/JsonLogEncoder.java)
+- [샘플 생성 코드](../../sample-was/src/main/java/com/logscope/sample/service/EventGenerator.java), [JSON encoder](../../sample-was/src/main/java/com/logscope/sample/logging/JsonLogEncoder.java)
 - [Vector 디스크 버퍼 공식 이슈](https://github.com/vectordotdev/vector/issues/26523)
-- [Vector 설정](../../collectors/vector.yaml), [배치 API](../../src/main/java/com/logscope/log/LogController.java)
-- [배치 단위 테스트](../../src/test/java/com/logscope/log/BatchTests.java), [샘플 단위 테스트](../../sample-was/src/test/java/com/logscope/sample/SampleTests.java), [전체 파이프라인 검증](../../scripts/verify-sample-pipeline.mjs)
+- [Vector 설정](../../collectors/vector.yaml), [배치 API](../../src/main/java/com/logscope/log/controller/LogController.java)
+- [배치 단위 테스트](../../src/test/java/com/logscope/log/service/BatchTests.java), [샘플 단위 테스트](../../sample-was/src/test/java/com/logscope/sample/service/SampleTests.java), [전체 파이프라인 검증](../../scripts/verify-sample-pipeline.mjs)
 
 <a id="backend-isolated-event-diagnostics-20261027"></a>
 
@@ -540,9 +541,9 @@ snapshot은 여러 값을 같은 시점의 DB 모습으로 읽는 것이다. cur
 ### 6. 관련 문서와 코드
 
 - [SSE 명세](../contracts/log-sse.md), [SSE 선택과 저장 순서 결정](../decisions/sse-log-delivery.md), [공통 아키텍처](../architecture.md)
-- [최초 snapshot·연결 API](../../src/main/java/com/logscope/log/LogLiveController.java), [저장과 snapshot](../../src/main/java/com/logscope/log/LogStore.java), [전송·연결 수명](../../src/main/java/com/logscope/log/LogStreamService.java)
-- [신호 경쟁 제어](../../src/main/java/com/logscope/log/LogStreamSignal.java), [cursor 검증](../../src/main/java/com/logscope/log/LogStreamCursor.java), [V3 migration](../../src/main/resources/db/migration/V3__log_stream_sequence.sql)
-- [단위 테스트](../../src/test/java/com/logscope/log/LogStreamTests.java), [실제 MySQL·HTTP 통합 테스트](../../src/test/java/com/logscope/LogApiTests.java), [기존 로그 migration 테스트](../../src/test/java/com/logscope/LogStreamMigrationTests.java)
+- [최초 snapshot·연결 API](../../src/main/java/com/logscope/log/controller/LogLiveController.java), [저장과 snapshot](../../src/main/java/com/logscope/log/repository/LogRepository.java), [전송·연결 수명](../../src/main/java/com/logscope/log/service/LogStreamService.java)
+- [신호 경쟁 제어](../../src/main/java/com/logscope/log/support/LogStreamSignal.java), [cursor 검증](../../src/main/java/com/logscope/log/domain/LogStreamCursor.java), [V3 migration](../../src/main/resources/db/migration/V3__log_stream_sequence.sql)
+- [단위 테스트](../../src/test/java/com/logscope/log/service/LogStreamTests.java), [실제 MySQL·HTTP 통합 테스트](../../src/test/java/com/logscope/LogApiTests.java), [기존 로그 migration 테스트](../../src/test/java/com/logscope/LogStreamMigrationTests.java)
 - [MDN SSE](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events), [Spring MVC 비동기 처리](https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-ann-async.html), [MySQL AUTO_INCREMENT](https://dev.mysql.com/doc/refman/8.4/en/innodb-auto-increment-handling.html)
 
 <a id="backend-sse-snapshot-clock-20261028"></a>
@@ -576,8 +577,8 @@ DB 연결을 얻기 전에 기다릴 수 있으므로 HTTP 요청 시작과 DB�
 ### 6. 관련 문서와 코드
 
 - [최초 SSE 설계 기록](#backend-sse-replay-20261028), [SSE API 명세](../contracts/log-sse.md)
-- [snapshot과 시간 경계](../../src/main/java/com/logscope/log/LogStore.java), [snapshot API](../../src/main/java/com/logscope/log/LogLiveController.java)
-- [연결 풀 대기 회귀 테스트](../../src/test/java/com/logscope/LogApiTests.java), [밀리초 경계 단위 테스트](../../src/test/java/com/logscope/log/LogStreamTests.java)
+- [snapshot과 시간 경계](../../src/main/java/com/logscope/log/repository/LogRepository.java), [snapshot API](../../src/main/java/com/logscope/log/controller/LogLiveController.java)
+- [연결 풀 대기 회귀 테스트](../../src/test/java/com/logscope/LogApiTests.java), [밀리초 경계 단위 테스트](../../src/test/java/com/logscope/log/service/LogStreamTests.java)
 
 <a id="backend-elasticsearch-search-20261028"></a>
 
@@ -630,9 +631,9 @@ keyword 필드는 정확한 값 필터·정렬에, text 필드는 분석 기반 
 ### 6. 관련 문서와 코드
 
 - [검색 명세](../contracts/log-search.md), [ES 선택 결정](../decisions/elasticsearch-log-search.md), [아키텍처](../architecture.md), [개발 ES 운영 경계](../operations.md)
-- [검색 API](../../src/main/java/com/logscope/log/LogSearchController.java), [입력/쿼리](../../src/main/java/com/logscope/log/LogSearchQuery.java), [제한된 REST 클라이언트](../../src/main/java/com/logscope/log/LogSearchClient.java)
-- [자동 색인 작업자](../../src/main/java/com/logscope/log/LogSearchIndexer.java), [스케줄 연결](../../src/main/java/com/logscope/log/LogSearchScheduler.java), [원본과 작업 저장](../../src/main/java/com/logscope/log/LogStore.java), [V4](../../src/main/resources/db/migration/V4__log_search_outbox.sql)
-- [Nori 이미지](../../elasticsearch/Dockerfile), [이미지 통합 검사](../../scripts/verify-search.mjs), [입력/자원 단위 테스트](../../src/test/java/com/logscope/log/LogSearchTests.java), [프로토콜 단위 테스트](../../src/test/java/com/logscope/log/LogSearchClientTests.java), [실제 ES/MySQL 통합 테스트](../../src/test/java/com/logscope/log/LogSearchIntegrationTests.java)
+- [검색 API](../../src/main/java/com/logscope/log/controller/LogSearchController.java), [입력/쿼리](../../src/main/java/com/logscope/log/dto/LogSearchQuery.java), [제한된 REST 클라이언트](../../src/main/java/com/logscope/log/client/LogSearchClient.java)
+- [자동 색인 작업자](../../src/main/java/com/logscope/log/service/LogSearchIndexer.java), [스케줄 연결](../../src/main/java/com/logscope/log/config/LogSearchSchedulingConfig.java), [원본과 작업 저장](../../src/main/java/com/logscope/log/repository/LogRepository.java), [V4](../../src/main/resources/db/migration/V4__log_search_outbox.sql)
+- [Nori 이미지](../../elasticsearch/Dockerfile), [이미지 통합 검사](../../scripts/verify-search.mjs), [입력/자원 단위 테스트](../../src/test/java/com/logscope/log/service/LogSearchTests.java), [프로토콜 단위 테스트](../../src/test/java/com/logscope/log/client/LogSearchClientTests.java), [실제 ES/MySQL 통합 테스트](../../src/test/java/com/logscope/log/integration/LogSearchIntegrationTests.java)
 - [Elastic 릴리스](https://www.elastic.co/docs/release-notes/elasticsearch), [Nori](https://www.elastic.co/docs/reference/elasticsearch/plugins/analysis-nori), [refresh](https://www.elastic.co/docs/reference/elasticsearch/rest-apis/refresh-parameter)
 
 
@@ -680,8 +681,62 @@ keyword 필드는 정확한 값 필터·정렬에, text 필드는 분석 기반 
 
 - [샘플 파일 로그·Vector 수집과 상황 목록](../sample-log-pipeline.md)
 - [이전 두 WAS·Vector 학습 기록](#backend-vector-samples-20261027)
-- [20개 이커머스 시나리오](../../sample-was/src/main/java/com/logscope/sample/CommerceScenarios.java)
-- [로그 생성과 예외 연결](../../sample-was/src/main/java/com/logscope/sample/EventGenerator.java)
-- [스케줄·상태·수동 API](../../sample-was/src/main/java/com/logscope/sample/SampleController.java)
-- [샘플 단위 테스트](../../sample-was/src/test/java/com/logscope/sample/SampleTests.java)
+- [20개 이커머스 시나리오](../../sample-was/src/main/java/com/logscope/sample/domain/CommerceScenarios.java)
+- [로그 생성과 예외 연결](../../sample-was/src/main/java/com/logscope/sample/service/EventGenerator.java)
+- [스케줄·상태·수동 API](../../sample-was/src/main/java/com/logscope/sample/controller/SampleController.java)
+- [샘플 단위 테스트](../../sample-was/src/test/java/com/logscope/sample/service/SampleTests.java)
 - [실제 수집 파이프라인 검증](../../scripts/verify-sample-pipeline.mjs)
+
+
+<a id="backend-feature-layers-20261028"></a>
+
+## 주제: 백엔드 기능별 내부 계층과 메서드 설명 규칙 / 시간: 2026-10-28 19:02 KST
+
+### 1. 사용자 요청과 목표
+
+백엔드 코드가 한 패키지에 뒤섞여 읽기 어렵다는 의견에 따라 전체 구조를 정리했다. 사용자는 Package by Feature + 내부 Layered 구조, API·메서드 위의 짧은 설명, 파일이 한 개여도 Config는 config 등 역할별 폴더에 두는 기준과 그 기준의 Markdown 기록을 요청했다. API·로그 형식·검색·SSE·DB 동작을 유지하는 구조 개선이다.
+
+### 2. 추가·변경한 내용
+
+중앙의 `com.logscope.log`와 독립 샘플의 `com.logscope.sample`을 기능 경계로 유지하고 그 안에 controller/service/repository/client/domain/dto/config/exception 등을 배치했다. 중앙 입력 검증은 validation, HTTP 본문 판독은 controller.support, 저장 후 깨우기 신호는 support다. 샘플 Logback 인코더는 logging으로 옮겼다. 실제 역할이 없는 빈 폴더는 만들지 않았다.
+
+`LogController`의 배치·정적 조회 처리는 `LogService`, 본문 크기·인코딩 판독은 `LogBodyReader`로 분리했다. 목록 조건은 `LogListQuery`로, 수집·목록·검색·snapshot·SSE 응답 record는 `LogResponses`로 옮겨 컨트롤러·저장소의 내부 선언에 묶이지 않게 했다. `LogStore`는 `LogRepository`로 이름과 위치를 맞췄다. 원본과 목록·상세 읽기 표현은 불변 `LogEvent`에 유지했다.
+
+검색 컨트롤러의 색인 세대 확인·동시 요청 제한·결과 조합은 `LogSearchService`, 검색 상태·outbox SQL과 잠금 트랜잭션은 `LogSearchRepository`로 분리했다. `LogSearchIndexer`는 재구성→대기 작업 조회→bulk→항목별 성공/재시도 순서를 담당한다. ES 문서 연산은 `LogSearchClient`, Query DSL 변환은 `LogSearchRequestMapper`, HTTP 기한·응답 크기·JSON 파싱과 자원 반환은 package-private `LogSearchTransport`로 구분했다.
+
+실시간 입력·cursor 검증은 `LogLiveService`, replay·연결 자원은 `LogStreamService`가 담당한다. 샘플의 자동 생성 상태·수동 생성은 `SampleService`, HTTP 오류 매핑은 `SampleController`, 스케줄 활성화는 `SampleSchedulingConfig`에 두었다. 중앙 검색 스케줄도 config에 배치했다. Logback XML의 인코더 경로와 테스트 설정·기존 문서의 코드 링크를 함께 수정했다.
+
+프로덕션 클래스와 직접 작성한 메서드에 역할을 설명하는 짧은 한국어 Javadoc을 추가했다. API에는 HTTP 메서드·경로·결과를 표시한다. [백엔드 코드 규칙](../backend-code-style.md)을 만들고 `src/AGENTS.md`와 `sample-was/AGENTS.md`가 해당 문서를 참조하도록 했다. 범위는 경로로 적용되며 다른 분야의 코드 구조를 바꾸는 규칙은 아니다.
+
+### 3. 선택 이유와 대안
+
+Package by Feature는 관련 코드를 기능별로 찾게 하고, 내부 Layered는 같은 기능 안에서 역할을 찾게 한다. 예를 들어 `log.controller`는 로그 기능의 HTTP 경계이고, 모든 기능의 컨트롤러를 하나의 루트 controller 폴더에 모으는 방식과 다르다. 현재 로그 하위의 수집·검색·실시간은 하나의 기능 내부 계층으로 관리하며, 충분히 커질 때 각각을 독립 기능으로 나눌 수 있다.
+
+폴더만 이동하면 컨트롤러의 SQL·재시도·동시 처리 책임이 남는다. 실제 처리 책임도 서비스·저장소·클라이언트로 분리해 코드를 읽는 순서를 만들었다. 다만 형식만 맞추기 위한 서비스 인터페이스·Base 클래스·빈 계층이나 새 라이브러리는 추가하지 않았다. 경계 밖에서 필요한 협력 메서드만 public으로 두고 통신 버퍼·세부 알고리즘은 숨겼다.
+
+검색 작업의 상태 행 잠금과 read-committed 트랜잭션은 SQL 저장소로 옮기면서도 ES 요청과 성공 확인까지 같은 범위를 유지했다. 원본의 repeatable-read snapshot과 원본/SSE 순서/outbox의 원자 저장, commit 이후 구독자를 깨우는 순서도 유지했다. 구조를 깔끔하게 만들기 위해 기존 정합성 의미를 바꾸지 않는 것이 우선이다.
+
+### 4. 동작 확인과 한계
+
+기존 서버97개·샘플4개 테스트는 위치·의존관계를 조정해 유지했다. 새10개 검사로 원본 저장/중복 영수증·입력 오류의 저장소 미접근·원문 예외 보존·미구현 목록/페이지 오류, 색인 잠금 범위 안의 부분 성공·세대 재구성·실패 보존·backoff, 샘플400 매핑과 기능/계층 위치·의존 경계를 확인했다. 전체 서버106개·샘플5개에 실패·생략은 없었다.
+
+실제 MySQL/HTTP/ES·SSE와 프론트 브라우저·SSR, 두 WAS의20개 시나리오·30초 자동 생성·Logback·Vector·원문 저장·회전·재시도 경로를 확인했다. API 경로·JSON·오류 코드·스키마·한도·복구 의미는 변경하지 않았다. 패키지 이동으로 예외 스택의 Java 클래스 경로는 달라질 수 있다. 처리량·응답 시간 개선을 측정한 작업은 아니다.
+
+전체 검사 도중 다른 작업의 브라우저 테스트가 같은 고정 검증 포트를 사용해 한 번 중단됐다. 제품 코드의 실패와 실행 환경 충돌을 구분하고 다른 프로세스를 종료하거나 검사를 생략하지 않았다. 해당 검증이 종료해 포트가 비워진 뒤 전체 검사를 다시 실행했다. 구조 검사도 소스의 정해진 위치·참조 경계를 확인하는 도구이며 모든 간접 의존과 런타임 동작을 증명하지는 않는다.
+
+### 5. 배운 개념과 남은 일
+
+Java 하위 패키지는 상위와 같은 패키지가 아니다. 기존 package-private 클래스·메서드를 폴더만 바꾸면 접근할 수 없으므로, 필요한 계층 간 협력 지점을 명시적으로 공개하고 내부 구현을 숨겨야 한다. Spring 컴포넌트 탐색, 생성자 주입, 예외 advice의 대상 클래스, Logback XML의 클래스 이름도 파일 이동과 함께 점검해야 한다.
+
+주석은 코드 이름을 길게 읽어 주는 문장보다 무엇을 보장하며 왜 그 순서를 지키는지를 설명할 때 유용하다. API 경로·오류·commit·재시도·자원 반환의 의미를 메서드 가까이 두고, 패키지의 탐색 방법과 반복 규칙은 별도 문서에 둔다. 이후 새 기능도 같은 기준을 따르며 기능·계층이 더 필요할 때 실제 책임을 기준으로 확장한다.
+
+### 6. 관련 문서와 코드
+
+- [백엔드 코드 구조와 주석 규칙](../backend-code-style.md)
+- [공통 아키텍처](../architecture.md)
+- [중앙 백엔드 경로별 지침](../../src/AGENTS.md), [샘플 경로별 지침](../../sample-was/AGENTS.md)
+- [수집·조회 컨트롤러](../../src/main/java/com/logscope/log/controller/LogController.java), [처리 서비스](../../src/main/java/com/logscope/log/service/LogService.java)
+- [검색 동기화 서비스](../../src/main/java/com/logscope/log/service/LogSearchIndexer.java), [검색 SQL 저장소](../../src/main/java/com/logscope/log/repository/LogSearchRepository.java)
+- [제한된 ES 통신](../../src/main/java/com/logscope/log/client/LogSearchTransport.java)
+- [구조 회귀 검사](../../src/test/java/com/logscope/architecture/BackendArchitectureTests.java)
+- [이전 ES 원리와 동기화 기록](#backend-elasticsearch-search-20261028), [샘플 시나리오 기록](#backend-commerce-samples-20261028)

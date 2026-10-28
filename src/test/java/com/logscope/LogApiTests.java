@@ -2,6 +2,7 @@ package com.logscope;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.logscope.config.TestcontainersConfiguration;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
