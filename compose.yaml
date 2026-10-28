@@ -17,6 +17,21 @@ services:
       timeout: 5s
       retries: 30
     restart: unless-stopped
+  elasticsearch:
+    build: ./elasticsearch
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      action.auto_create_index: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    volumes: ["elasticsearch-data:/usr/share/elasticsearch/data"]
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=2s' >/dev/null"]
+      interval: 5s
+      timeout: 5s
+      retries: 60
+    restart: unless-stopped
   app:
     build: .
     environment:
@@ -24,6 +39,8 @@ services:
       DB_URL: ${DB_URL:?Set DB_URL}
       DB_USERNAME: ${DB_USERNAME:?Set DB_USERNAME}
       DB_PASSWORD: ${DB_PASSWORD:?Set DB_PASSWORD}
+      SEARCH_ENABLED: "true"
+      SEARCH_URL: http://elasticsearch:9200
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:
@@ -80,6 +97,7 @@ services:
     depends_on: [sample-was-2, app]
     restart: unless-stopped
 volumes:
+  elasticsearch-data:
   mysql-data:
   sample-one-logs:
   sample-two-logs:

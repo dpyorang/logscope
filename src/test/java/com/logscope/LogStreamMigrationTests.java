@@ -40,6 +40,10 @@ class LogStreamMigrationTests {
         assertThat(rs.next()).isTrue();
         assertThat(rs.getLong(1)).isEqualTo(2);
       }
+      try (var rs = sql.executeQuery("SELECT COUNT(*) FROM log_search_outbox")) {
+        assertThat(rs.next()).isTrue();
+        assertThat(rs.getInt(1)).isEqualTo(2);
+      }
       String epoch;
       try (var rs =
           sql.executeQuery("SELECT epoch,last_sequence FROM log_stream_state WHERE id=1")) {

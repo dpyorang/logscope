@@ -54,3 +54,7 @@ Next.js·Spring Boot의 실제 이미지·포트·health·네트워크, 조회 �
 ## 2026-10-28 SSE 실시간 조회
 
 사용자가 서버 push를 요청해 [SSE 명세](contracts/log-sse.md)를 추가한다. 최초 `/live`의 목록·cursor는 동일 DB snapshot이고, `/stream`은 저장 확정 순서로 replay한 뒤 새 commit을 전달한다. 기존 정적 목록·상세·수집 API는 유지한다. DB 순서 상태의 행 잠금으로 commit 역전 누락을 막고, 메모리는 깨우기 신호만 보관한다. 서버 재시작에도 DB cursor와 로그로 복구한다. frontend의 SSR·중계·일시정지/재개는 별도 프론트 작업으로 연결하며 백엔드 구현만으로 화면 연동 완료라고 하지 않는다.
+
+## 2026-10-28 Elasticsearch 검색 projection
+
+사용자 요청으로 Redis 없이 MySQL 원본과 Elasticsearch 검색 색인을 분리한다. 원본·SSE 순서·색인 outbox를 같은 트랜잭션으로 저장하고 작업자가 검색 가능 반영 후 대기 항목을 제거한다. ES 장애에도 수집과 SSE를 유지하며 검색은503으로 구분한다. 기존 정적 목록과 SSE를 바꾸지 않는 `/api/v1/logs/search`의 한국어 분석·필터·최신 결과/대기 상태는 [검색 명세](contracts/log-search.md), 원리와 선택 이유는 [결정 기록](decisions/elasticsearch-log-search.md)을 따른다. 프론트 검색 UI는 별도 작업이다.
