@@ -1,0 +1,28 @@
+[Unit]
+Description=logscope synthetic-data demo
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/logscope/current
+RuntimeDirectory=logscope-demo
+RuntimeDirectoryMode=0700
+LoadCredentialEncrypted=DB_USERNAME:/etc/credstore.encrypted/logscope-demo/DB_USERNAME
+LoadCredentialEncrypted=DB_PASSWORD:/etc/credstore.encrypted/logscope-demo/DB_PASSWORD
+LoadCredentialEncrypted=MYSQL_ROOT_PASSWORD:/etc/credstore.encrypted/logscope-demo/MYSQL_ROOT_PASSWORD
+LoadCredentialEncrypted=WEB_AUTH:/etc/credstore.encrypted/logscope-demo/WEB_AUTH
+ExecStartPre=/usr/bin/install -m 0444 %d/DB_USERNAME /run/logscope-demo/DB_USERNAME
+ExecStartPre=/usr/bin/install -m 0444 %d/DB_PASSWORD /run/logscope-demo/DB_PASSWORD
+ExecStartPre=/usr/bin/install -m 0444 %d/MYSQL_ROOT_PASSWORD /run/logscope-demo/MYSQL_ROOT_PASSWORD
+ExecStartPre=/usr/bin/install -m 0444 %d/WEB_AUTH /run/logscope-demo/WEB_AUTH
+Environment=DEMO_SECRET_DIR=/run/logscope-demo
+ExecStart=/usr/bin/docker compose --env-file /etc/logscope-demo.env -f compose.demo.yaml up -d --wait --wait-timeout 180
+ExecStop=/usr/bin/docker compose --env-file /etc/logscope-demo.env -f compose.demo.yaml stop
+TimeoutStartSec=240
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

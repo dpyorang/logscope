@@ -14,6 +14,7 @@ trap cleanup_images EXIT HUP INT TERM
 ./gradlew --no-daemon --console=plain clean build
 ./scripts/verify-frontend.sh
 docker compose --env-file .env.example config --quiet
+./scripts/check-demo-config.sh
 docker build --tag "$LOGSCOPE_SEARCH_VERIFY_IMAGE" ./elasticsearch
 docker build --tag "$LOGSCOPE_VERIFY_IMAGE" .
 node scripts/verify-search.mjs

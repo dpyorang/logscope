@@ -1,0 +1,32 @@
+{
+	admin off
+}
+
+(demo_access) {
+	basic_auth {
+		import /run/secrets/WEB_AUTH
+	}
+	header Cache-Control "no-store"
+}
+
+{$DEMO_HOST} {
+	import demo_access
+	reverse_proxy frontend:3000 {
+		header_up -Authorization
+		flush_interval -1
+	}
+}
+
+was1.{$DEMO_HOST} {
+	import demo_access
+	reverse_proxy sample-was-1:8080 {
+		header_up -Authorization
+	}
+}
+
+was2.{$DEMO_HOST} {
+	import demo_access
+	reverse_proxy sample-was-2:8080 {
+		header_up -Authorization
+	}
+}
