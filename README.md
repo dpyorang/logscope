@@ -206,6 +206,8 @@ Docker가 없으면 실제 DB 검사를 생략하는 방식은 사용하지 않�
 
 ## 상세 문서
 
+처음 읽는다면 [기능별 문서 안내](docs/README.md)에서 수집 → 저장 → 실시간 → 검색 순서로 확인하세요. [현재 구현 상태](docs/implementation-status.md)와 [다음 진행 제안](docs/next-steps.md)도 함께 제공합니다.
+
 | 주제 | 문서 |
 | --- | --- |
 | 전체 구조 | [아키텍처](docs/architecture.md) |
