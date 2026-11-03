@@ -16,6 +16,7 @@
 | [초기 세팅 완료 기록 갱신](#infrastructure-setup-status-pr-retro) | 2026-10-27 15:47 KST | 회고 보충: setup-status의 과거 미완료 설명을 갱신하고 현재 개발 준비 상태와 운영 후속 과제 구분. |
 | [인프라 추천값의 제안 문서화](#infrastructure-proposals-retro) | 2026-10-27 15:47 KST | 회고 보충: Next 실행·검증·중계·키·부하 추천값과 이유 보존. 구현·설정 적용 없음. |
 | [기능별 결정과 Gradle/npm 검증 책임의 후속 기준](#infrastructure-workflow-decision-retro) | 2026-10-27 15:47 KST | 회고 보충: 공통 승인 기록을 읽고 인프라 적용 시점을 구분. 새 실행 구성은 미구현. |
+| [AWS 단일 VM 합성 데모 배포 구성](#infrastructure-aws-demo-20261103) | 2026-11-03 14:46 KST | 전체 서비스를 별도 Compose로 묶고 HTTPS 인증·내부 네트워크·암호화 비밀 주입·메모리와 로그 한도를 구성. |
 
 <a id="infrastructure-foundation"></a>
 
@@ -503,3 +504,45 @@ docs/decisions/mvp-infrastructure-proposals.md를 작성하고 기존 분야 간
 ### 6. 관련 문서와 코드
 
 [공통 규칙](../../AGENTS.md), [기능 단위 진행](../feature-development-workflow.md), [확정 기준](../decisions/mvp-spec-alignment.md), [추천값 회고](#infrastructure-proposals-retro).
+
+
+<a id="infrastructure-aws-demo-20261103"></a>
+
+## 주제: AWS 단일 VM 합성 데모 배포 구성 / 시간: 2026-11-03 14:46 KST
+
+### 1. 사용자 요청과 목표
+
+사용자는 비용을 직접 지불하지 않고 포트폴리오·학습용으로 전체 앱을 사용한 뒤 크레딧 종료 전에 내리기를 원했다. Oracle 가입이 완료되지 않아 AWS 무료 플랜과 EC2 한 대에 전체 서비스를 배치하는 방향을 선택했다. 도메인 기능을 새로 만드는 작업은 포함하지 않는다.
+
+### 2. 추가·변경한 내용
+
+독립 `compose.demo.yaml`에 Next.js·Spring·MySQL·Nori Elasticsearch·두 WAS·Vector와 Caddy를 구성했다. 외부 포트는80·443이고 DB·검색·수집 네트워크는 내부로 분리했다. 화면은 HTTPS Basic 인증 뒤에 두고 Authorization은 상위 앱으로 전달하지 않는다. 샘플 화면의 절대 경로를 유지하기 위해 별도 호스트를 사용한다. SSE는 즉시 flush한다.
+
+비밀은 systemd 암호화 자격정보 저장소에서 서비스 시작 시 복호화하고 root 전용 런타임 디렉터리의 파일로 주입한다. 컨테이너 메모리 상한과 Docker 로그10MB×3개 제한을 두었다. 검증 진입점에는 실제 자격정보 없이 Compose와 Caddy 설정을 검사하는 스크립트를 추가했다.
+
+### 3. 선택 이유와 대안
+
+한 VM의 Compose는 현재 다중 프로세스·파일 볼륨·SSE 구성을 유지하며 관리 대상을 줄인다. Vercel 분리 배포는 별도 백엔드 실행 환경이 여전히 필요하고 중계 연결 제한·네트워크 관리가 추가되어 미뤘다. RDS·OpenSearch·로드 밸런서는 작은 데모에 추가 자원과 비용 관리를 만들기 때문에 선택하지 않았다.
+
+외부 유료 비밀 관리 서비스를 바로 추가하는 대신 OS의 자격정보 관리 기능을 사용했다. 이 방식은 host 키를 가진 root를 막거나 원격 IAM·감사를 제공하지 않는다. 인증 비활성 ES는 합성 데모의 격리된 내부 네트워크에만 한정하며 고객 데이터 운영 기준으로 일반화하지 않는다.
+
+### 4. 동작 확인과 한계
+
+데모 Compose와 Caddy 설정이 예시 비밀 파일로 유효하게 해석된다. 기존 MySQL·ES 장애/복구·SSR·SSE·검색·두 WAS의 파일 회전/체크포인트/배치 전달을 유지한다. 이 기록 시점에는 원격 전체 앱의 기동·인증서·재시작 후 보존 확인이 진행 전이므로 실제 배포 완료를 뜻하지 않는다.
+
+8GiB는 시작 사양이며 부하 보장이 아니다. 단일 VM은 장애 지점이고 DB·ES에 자동 보존 삭제가 아직 없다. 디스크80% 전에 로그 생성을 정지하고 보존·백업을 점검한다. 무료 플랜도 사용량이 크레딧을 소비하며 사용 기간이6개월보다 짧을 수 있다.
+
+### 5. 배운 개념과 남은 일
+
+무료 플랜은 컴퓨팅이 무제한 무료인 것이 아니라 지급된 크레딧과 계정 제한으로 비용을 통제하는 방식이다. EC2 stop은 디스크 등 모든 자원의 비용 종료가 아니다. 공개 진입점의 인증·TLS와 내부 서비스의 네트워크 격리는 서로 다른 역할이다. 암호화된 비밀은 저장 상태와 실행 중 파일을 구분해야 한다.
+
+다음은 원격 HTTPS·접근 인증·수집→실시간→검색과 데이터 보존/복원 확인이다. 주소·개인 키·비밀번호·계정 식별자는 학습 문서에 기록하지 않는다. 실제 고객 로그 운영·고가용성·장기 보존은 별도 후속 범위다.
+
+### 6. 관련 문서와 코드
+
+- [AWS 데모 배포와 종료 절차](../aws-demo-deployment.md)
+- [운영·복구 기준](../operations.md)
+- [데모 Compose](../../compose.demo.yaml)
+- [HTTPS와 접근 인증](../../deploy/demo/Caddyfile)
+- [암호화 비밀 주입과 재기동](../../deploy/demo/logscope-demo.service)
+- [데모 설정 검사](../../scripts/check-demo-config.sh)

@@ -1,0 +1,156 @@
+# Synthetic-data demo on one VM. Standalone; never merge with compose.yaml.
+name: logscope-demo
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+x-service: &service
+  restart: unless-stopped
+  logging: *logging
+  security_opt: [no-new-privileges:true]
+services:
+  db:
+    <<: *service
+    image: mysql:8.4.13
+    environment:
+      MYSQL_DATABASE: logscope
+      MYSQL_USER: logscope
+      MYSQL_PASSWORD_FILE: /run/secrets/DB_PASSWORD
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/MYSQL_ROOT_PASSWORD
+    secrets: [DB_PASSWORD, MYSQL_ROOT_PASSWORD]
+    command: ["--innodb-buffer-pool-size=256M", "--max-connections=30", "--binlog-expire-logs-seconds=172800"]
+    volumes: ["mysql-data:/var/lib/mysql"]
+    networks: [database]
+    mem_limit: 1g
+    healthcheck:
+      test: ["CMD-SHELL", 'MYSQL_PWD="$$(cat /run/secrets/DB_PASSWORD)" mysql -h 127.0.0.1 -u logscope -D logscope -e "SELECT 1" >/dev/null']
+      interval: 10s
+      timeout: 5s
+      retries: 30
+  elasticsearch:
+    <<: *service
+    image: ${SEARCH_IMAGE:?Set verified search image}
+    environment:
+      discovery.type: single-node
+      xpack.security.enabled: "false"
+      action.auto_create_index: "false"
+      ES_JAVA_OPTS: -Xms512m -Xmx512m
+    volumes: ["elasticsearch-data:/usr/share/elasticsearch/data"]
+    networks: [search]
+    mem_limit: 2g
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=2s' >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 60
+  app:
+    <<: *service
+    image: ${APP_IMAGE:?Set verified backend image}
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DB_URL: jdbc:mysql://db:3306/logscope?connectionTimeZone=UTC
+      DB_POOL_SIZE: "5"
+      SEARCH_ENABLED: "true"
+      SEARCH_URL: http://elasticsearch:9200
+      JAVA_TOOL_OPTIONS: -Xms128m -Xmx512m
+    secrets: [DB_USERNAME, DB_PASSWORD]
+    networks: [database, search, application, collection]
+    depends_on:
+      db: {condition: service_healthy}
+      elasticsearch: {condition: service_healthy}
+    mem_limit: 1g
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    stop_grace_period: 40s
+  frontend:
+    <<: *service
+    image: ${FRONTEND_IMAGE:?Set verified frontend image}
+    environment:
+      LOGSCOPE_API_BASE_URL: http://app:8080
+      NODE_OPTIONS: --max-old-space-size=256
+    networks: [application, edge]
+    depends_on: [app]
+    mem_limit: 512m
+    init: true
+    stop_grace_period: 15s
+  sample-was-1:
+    <<: *service
+    image: ${SAMPLE_IMAGE:?Set verified sample image}
+    environment:
+      INSTANCE_ID: was-1
+      SAMPLE_LOG_DIR: /logs
+      JAVA_TOOL_OPTIONS: -Xms64m -Xmx192m
+    volumes: ["sample-one-logs:/logs"]
+    networks: [samples]
+    mem_limit: 384m
+  sample-was-2:
+    <<: *service
+    image: ${SAMPLE_IMAGE:?Set verified sample image}
+    environment:
+      INSTANCE_ID: was-2
+      SAMPLE_LOG_DIR: /logs
+      JAVA_TOOL_OPTIONS: -Xms64m -Xmx192m
+    volumes: ["sample-two-logs:/logs"]
+    networks: [samples]
+    mem_limit: 384m
+  vector-1:
+    <<: *service
+    image: timberio/vector:0.60.0-debian
+    volumes:
+      - ./collectors/vector.yaml:/etc/vector/vector.yaml:ro
+      - sample-one-logs:/logs:ro
+      - vector-one-data:/var/lib/vector
+    networks: [collection]
+    depends_on: [sample-was-1, app]
+    mem_limit: 128m
+  vector-2:
+    <<: *service
+    image: timberio/vector:0.60.0-debian
+    volumes:
+      - ./collectors/vector.yaml:/etc/vector/vector.yaml:ro
+      - sample-two-logs:/logs:ro
+      - vector-two-data:/var/lib/vector
+    networks: [collection]
+    depends_on: [sample-was-2, app]
+    mem_limit: 128m
+  gateway:
+    <<: *service
+    image: caddy:2.11.7
+    environment:
+      DEMO_HOST: ${DEMO_HOST:?Set public demo hostname}
+    secrets: [WEB_AUTH]
+    volumes:
+      - ./deploy/demo/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    ports: ["80:80", "443:443"]
+    networks: [edge, samples]
+    depends_on: [frontend, sample-was-1, sample-was-2]
+    mem_limit: 128m
+networks:
+  edge: {}
+  application: {internal: true}
+  database: {internal: true}
+  search: {internal: true}
+  samples: {internal: true}
+  collection: {internal: true}
+volumes:
+  mysql-data: {}
+  elasticsearch-data: {}
+  sample-one-logs: {}
+  sample-two-logs: {}
+  vector-one-data: {}
+  vector-two-data: {}
+  caddy-data: {}
+  caddy-config: {}
+secrets:
+  DB_USERNAME:
+    file: ${DEMO_SECRET_DIR:?Set secret manager runtime directory}/DB_USERNAME
+  DB_PASSWORD:
+    file: ${DEMO_SECRET_DIR:?Set secret manager runtime directory}/DB_PASSWORD
+  MYSQL_ROOT_PASSWORD:
+    file: ${DEMO_SECRET_DIR:?Set secret manager runtime directory}/MYSQL_ROOT_PASSWORD
+  WEB_AUTH:
+    file: ${DEMO_SECRET_DIR:?Set secret manager runtime directory}/WEB_AUTH
