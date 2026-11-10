@@ -11,8 +11,8 @@ import org.springframework.web.server.ResponseStatusException;
 class SampleControllerTests {
   @Test
   void mapsInvalidScenarioTo400WithoutLeakingBusinessExceptionDetails() {
-    var service = mock(SampleService.class);
-    var input = new Input("INFO", false, "UNKNOWN");
+    SampleService service = mock(SampleService.class);
+    Input input = new Input("INFO", false, "UNKNOWN");
     when(service.create(input))
         .thenThrow(new IllegalArgumentException("synthetic internal reason"));
     assertThatThrownBy(() -> new SampleController(service).create(input))

@@ -1,11 +1,14 @@
 package com.logscope.log.service;
 
 import com.logscope.log.client.LogSearchClient;
+import com.logscope.log.domain.LogEvent.Summary;
 import com.logscope.log.dto.LogResponses.SearchResult;
+import com.logscope.log.dto.LogResponses.Synchronization;
 import com.logscope.log.dto.LogSearchQuery;
 import com.logscope.log.exception.LogApiException;
 import com.logscope.log.repository.LogRepository;
 import com.logscope.log.repository.LogSearchRepository;
+import java.util.List;
 import org.springframework.stereotype.Service;
 import org.springframework.util.MultiValueMap;
 
@@ -27,17 +30,17 @@ public class LogSearchService {
 
   /** 동시 검색 상한과 색인 세대를 확인하고 검색 결과·전역 대기 상태를 조합한다. */
   public SearchResult search(MultiValueMap<String, String> params) {
-    var query = LogSearchQuery.parse(params);
+    LogSearchQuery query = LogSearchQuery.parse(params);
     if (!slots.tryAcquire()) throw new LogApiException(503, "SEARCH_CAPACITY_EXCEEDED");
     try {
       String uuid = client.identity(store.head().epoch(), false);
       String known = repository.indexUuid();
       if (!uuid.equals(known)) throw new LogApiException(503, "SEARCH_INDEX_REBUILDING");
-      var rows = client.search(query);
+      List<Summary> rows = client.search(query);
       // Status is a global observation, not a count of matching documents or a search snapshot.
       if (!uuid.equals(client.identity(store.head().epoch(), false)))
         throw new LogApiException(503, "SEARCH_INDEX_REBUILDING");
-      var synchronization = repository.synchronization();
+      Synchronization synchronization = repository.synchronization();
       return new SearchResult(
           rows.stream().limit(query.size()).toList(),
           query.size(),

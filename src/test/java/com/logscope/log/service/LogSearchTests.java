@@ -10,13 +10,19 @@ import com.logscope.log.dto.LogSearchQuery;
 import com.logscope.log.exception.LogApiException;
 import com.logscope.log.repository.LogRepository;
 import com.logscope.log.repository.LogSearchRepository;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.util.LinkedMultiValueMap;
+import tools.jackson.databind.JsonNode;
 
 class LogSearchTests {
   private LinkedMultiValueMap<String, String> params() {
-    var result = new LinkedMultiValueMap<String, String>();
+    LinkedMultiValueMap<String, String> result = new LinkedMultiValueMap<String, String>();
     result.add("from", "2026-10-28T00:00:00Z");
     result.add("to", "2026-10-29T00:00:00Z");
     return result;
@@ -24,14 +30,14 @@ class LogSearchTests {
 
   @Test
   void combinesExactFiltersAndAnalyzedAndMessageWithoutInterpretingQuerySyntax() {
-    var values = params();
+    LinkedMultiValueMap<String, String> values = params();
     values.add("level", "ERROR");
     values.add("instanceId", "was-2");
     values.add("keyword", "  결제 오류 +* OR  ");
     values.add("size", "1");
-    var query = LogSearchQuery.parse(values);
+    LogSearchQuery query = LogSearchQuery.parse(values);
     assertThat(query.keyword()).isEqualTo("결제 오류 +* OR");
-    var json =
+    JsonNode json =
         tools.jackson.databind.json.JsonMapper.builder()
             .build()
             .valueToTree(LogSearchRequestMapper.body(query));
@@ -63,12 +69,12 @@ class LogSearchTests {
   @Test
   void enforcesMandatoryUtcRangeAndTwentyFourHourBoundary() {
     assertThat(LogSearchQuery.parse(params()).size()).isEqualTo(50);
-    var values = params();
+    LinkedMultiValueMap<String, String> values = params();
     values.remove("from");
     assertThatThrownBy(() -> LogSearchQuery.parse(values)).isInstanceOf(LogApiException.class);
     for (String to :
         List.of("2026-10-28T00:00:00Z", "2026-10-29T00:00:00.001Z", "2026-10-29T00:00:00+09:00")) {
-      var invalid = params();
+      LinkedMultiValueMap<String, String> invalid = params();
       invalid.set("to", to);
       assertThatThrownBy(() -> LogSearchQuery.parse(invalid)).isInstanceOf(LogApiException.class);
     }
@@ -76,7 +82,7 @@ class LogSearchTests {
 
   @Test
   void rejectsUnknownDuplicateBlankAndMalformedFilters() {
-    for (var pair :
+    for (String[] pair :
         List.of(
             new String[] {"level", "error"},
             new String[] {"instanceId", "was 2"},
@@ -88,11 +94,11 @@ class LogSearchTests {
             new String[] {"size", "-1"},
             new String[] {"size", "1.5"},
             new String[] {"cursor", "x"})) {
-      var invalid = params();
+      LinkedMultiValueMap<String, String> invalid = params();
       invalid.add(pair[0], pair[1]);
       assertThatThrownBy(() -> LogSearchQuery.parse(invalid)).isInstanceOf(LogApiException.class);
     }
-    var duplicate = params();
+    LinkedMultiValueMap<String, String> duplicate = params();
     duplicate.add("from", duplicate.getFirst("from"));
     assertThatThrownBy(() -> LogSearchQuery.parse(duplicate)).isInstanceOf(LogApiException.class);
   }
@@ -100,12 +106,12 @@ class LogSearchTests {
   @Test
   void acceptsUnicodeCodePointLimitAndSizeBoundaries() {
     for (String size : List.of("1", "100")) {
-      var values = params();
+      LinkedMultiValueMap<String, String> values = params();
       values.add("size", size);
       values.add("keyword", "결제".repeat(100));
       assertThat(LogSearchQuery.parse(values).size()).isEqualTo(Integer.parseInt(size));
     }
-    var values = params();
+    LinkedMultiValueMap<String, String> values = params();
     values.add("keyword", "😀".repeat(200));
     assertThat(LogSearchQuery.parse(values).keyword().codePointCount(0, 400)).isEqualTo(200);
   }
@@ -121,12 +127,12 @@ class LogSearchTests {
 
   @Test
   void concurrentSearchLimitRejectsExcessAndReturnsSlotsAfterCompletion() throws Exception {
-    var client = org.mockito.Mockito.mock(LogSearchClient.class);
-    var jdbc = org.mockito.Mockito.mock(org.springframework.jdbc.core.JdbcTemplate.class);
-    var store = org.mockito.Mockito.mock(LogRepository.class);
+    LogSearchClient client = org.mockito.Mockito.mock(LogSearchClient.class);
+    JdbcTemplate jdbc = org.mockito.Mockito.mock(org.springframework.jdbc.core.JdbcTemplate.class);
+    LogRepository store = org.mockito.Mockito.mock(LogRepository.class);
     org.mockito.Mockito.when(store.head()).thenReturn(new LogStreamCursor("example", 0));
-    var entered = new java.util.concurrent.CountDownLatch(16);
-    var release = new java.util.concurrent.CountDownLatch(1);
+    CountDownLatch entered = new java.util.concurrent.CountDownLatch(16);
+    CountDownLatch release = new java.util.concurrent.CountDownLatch(1);
     org.mockito.Mockito.when(client.identity("example", false))
         .thenAnswer(
             invocation -> {
@@ -139,7 +145,7 @@ class LogSearchTests {
     org.mockito.Mockito.when(
             jdbc.queryForObject("SELECT index_uuid FROM log_search_state WHERE id=1", String.class))
         .thenReturn("owned");
-    var controller =
+    LogSearchController controller =
         new LogSearchController(
             new LogSearchService(
                 client,
@@ -148,8 +154,8 @@ class LogSearchTests {
                     org.mockito.Mockito.mock(
                         org.springframework.transaction.PlatformTransactionManager.class)),
                 store));
-    try (var tasks = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
-      var futures = new java.util.ArrayList<java.util.concurrent.Future<?>>();
+    try (ExecutorService tasks = java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor()) {
+      ArrayList<Future<?>> futures = new java.util.ArrayList<java.util.concurrent.Future<?>>();
       try {
         for (int i = 0; i < 16; i++) futures.add(tasks.submit(() -> controller.search(params())));
         assertThat(entered.await(5, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
@@ -158,20 +164,20 @@ class LogSearchTests {
       } finally {
         release.countDown();
       }
-      for (var task : futures) task.get(5, java.util.concurrent.TimeUnit.SECONDS);
+      for (Future<?> task : futures) task.get(5, java.util.concurrent.TimeUnit.SECONDS);
       assertThat(controller.search(params()).getStatusCode().value()).isEqualTo(200);
     }
   }
 
   @Test
   void repeatedSearchFailuresDoNotLeakAdmissionSlots() {
-    var client = org.mockito.Mockito.mock(LogSearchClient.class);
-    var jdbc = org.mockito.Mockito.mock(org.springframework.jdbc.core.JdbcTemplate.class);
-    var store = org.mockito.Mockito.mock(LogRepository.class);
+    LogSearchClient client = org.mockito.Mockito.mock(LogSearchClient.class);
+    JdbcTemplate jdbc = org.mockito.Mockito.mock(org.springframework.jdbc.core.JdbcTemplate.class);
+    LogRepository store = org.mockito.Mockito.mock(LogRepository.class);
     org.mockito.Mockito.when(store.head()).thenReturn(new LogStreamCursor("example", 0));
     org.mockito.Mockito.when(client.identity("example", false))
         .thenThrow(new LogSearchClient.Unavailable());
-    var controller =
+    LogSearchController controller =
         new LogSearchController(
             new LogSearchService(
                 client,

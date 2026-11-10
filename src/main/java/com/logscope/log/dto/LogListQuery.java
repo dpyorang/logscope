@@ -18,8 +18,8 @@ public record LogListQuery(Instant from, Instant to, int size) {
       if (params.get(key).size() != 1) throw new LogApiException(key, "DUPLICATE_PARAMETER");
       if (params.getFirst(key).isBlank()) throw new LogApiException(key, "INVALID_FORMAT");
     }
-    var from = LogInput.time(params.getFirst("from"), "from");
-    var to = LogInput.time(params.getFirst("to"), "to");
+    Instant from = LogInput.time(params.getFirst("from"), "from");
+    Instant to = LogInput.time(params.getFirst("to"), "to");
     if (!from.isBefore(to) || Duration.between(from, to).compareTo(Duration.ofHours(24)) > 0)
       throw new LogApiException("to", "OUT_OF_RANGE");
     int size = 50;

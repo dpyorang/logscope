@@ -4,6 +4,7 @@ import com.logscope.log.domain.LogEvent;
 import com.logscope.log.exception.LogApiException;
 import java.time.DateTimeException;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.util.Set;
 import tools.jackson.databind.JsonNode;
 
@@ -62,7 +63,7 @@ public final class LogInput {
     try {
       // LocalDateTime parsing rejects leap seconds and invalid calendar dates rather than
       // normalizing.
-      var date = java.time.LocalDateTime.parse(value.substring(0, value.length() - 1));
+      LocalDateTime date = java.time.LocalDateTime.parse(value.substring(0, value.length() - 1));
       if (date.getYear() < 1000) throw new LogApiException(field, "OUT_OF_RANGE");
       return date.toInstant(java.time.ZoneOffset.UTC);
     } catch (DateTimeException e) {

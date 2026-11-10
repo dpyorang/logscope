@@ -40,7 +40,7 @@ final class LogSearchTransport implements AutoCloseable {
   /** 리다이렉트 없이 ES에 요청하고 전체 기한·본문 크기·엄격한 JSON 형식을 검사한다. */
   Reply call(String method, String path, String body) {
     if (!enabled) throw new LogSearchClient.Unavailable();
-    var builder =
+    HttpRequest.Builder builder =
         HttpRequest.newBuilder(base.resolve(path))
             .timeout(Duration.ofSeconds(3))
             .header("Accept", "application/json");
@@ -52,16 +52,17 @@ final class LogSearchTransport implements AutoCloseable {
     if (body != null)
       builder.header(
           "Content-Type", path.startsWith("/_bulk") ? "application/x-ndjson" : "application/json");
-    var future = http.sendAsync(builder.build(), info -> new BoundedBody());
+    CompletableFuture<HttpResponse<byte[]>> future =
+        http.sendAsync(builder.build(), info -> new BoundedBody());
     try {
-      var response = future.get(4, TimeUnit.SECONDS);
+      HttpResponse<byte[]> response = future.get(4, TimeUnit.SECONDS);
       if (!response
           .headers()
           .firstValue("content-type")
           .orElse("")
           .toLowerCase(java.util.Locale.ROOT)
           .startsWith("application/json")) throw new LogSearchClient.Unavailable();
-      var parsed = json.readTree(response.body());
+      JsonNode parsed = json.readTree(response.body());
       if (parsed == null || !parsed.isObject()) throw new LogSearchClient.Unavailable();
       return new Reply(response.statusCode(), parsed);
     } catch (Exception error) {
@@ -103,8 +104,8 @@ final class LogSearchTransport implements AutoCloseable {
         result.completeExceptionally(new LogSearchClient.Unavailable());
         return;
       }
-      for (var buffer : buffers) {
-        var chunk = new byte[buffer.remaining()];
+      for (ByteBuffer buffer : buffers) {
+        byte[] chunk = new byte[buffer.remaining()];
         buffer.get(chunk);
         bytes.writeBytes(chunk);
       }

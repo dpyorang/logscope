@@ -30,7 +30,7 @@ public class LogController {
   /** POST /api/v1/logs: 한 건을 수집하고 신규 저장은 201, 동일 재전송은 200을 반환한다. */
   @PostMapping(produces = MediaType.APPLICATION_JSON_VALUE)
   public ResponseEntity<Receipt> collect(HttpServletRequest request) throws IOException {
-    var receipt = service.collect(reader.read(request, 262144));
+    Receipt receipt = service.collect(reader.read(request, 262144));
     return "STORED".equals(receipt.status())
         ? ResponseEntity.created(URI.create("/api/v1/logs/" + receipt.eventId())).body(receipt)
         : ResponseEntity.ok(receipt);

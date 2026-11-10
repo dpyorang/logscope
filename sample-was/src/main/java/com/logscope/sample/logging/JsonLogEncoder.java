@@ -34,7 +34,7 @@ public class JsonLogEncoder extends EncoderBase<ILoggingEvent> {
   /** 공통 로그 필드와 줄바꿈이 escape된 예외를 UTF-8 JSON 한 행으로 직렬화한다. */
   @Override
   public byte[] encode(ILoggingEvent event) {
-    var fields = new LinkedHashMap<String, Object>();
+    LinkedHashMap<String, Object> fields = new LinkedHashMap<String, Object>();
     fields.put("eventId", event.getMDCPropertyMap().get("eventId"));
     fields.put(
         "occurredAt",

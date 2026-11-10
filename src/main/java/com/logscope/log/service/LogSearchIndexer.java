@@ -39,7 +39,7 @@ public class LogSearchIndexer {
   private void synchronizeBatch(String previous) {
     String uuid = client.identity(store.head().epoch(), true);
     if (!uuid.equals(previous)) repository.rebuild(uuid);
-    var pending = repository.readyBatch();
+    List<LogSearchRepository.Pending> pending = repository.readyBatch();
     if (pending.isEmpty()) return;
     List<Boolean> successes;
     try {
@@ -51,7 +51,7 @@ public class LogSearchIndexer {
     }
     boolean any = false;
     for (int i = 0; i < pending.size(); i++) {
-      var row = pending.get(i);
+      LogSearchRepository.Pending row = pending.get(i);
       if (successes.get(i)) {
         repository.acknowledge(row.item().eventId());
         any = true;

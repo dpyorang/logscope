@@ -33,9 +33,9 @@ public class LogLiveService {
       throw new LogApiException("query", "UNKNOWN_FIELD");
     if (params.get("after").size() != 1) throw new LogApiException("after", "DUPLICATE_PARAMETER");
     // Validate both sources, even when the reconnect header takes precedence.
-    var query = LogStreamCursor.parse(params.getFirst("after"));
+    LogStreamCursor query = LogStreamCursor.parse(params.getFirst("after"));
     if (headers.size() > 1) throw new LogApiException("after", "DUPLICATE_PARAMETER");
-    var cursor = headers.isEmpty() ? query : LogStreamCursor.parse(headers.getFirst());
+    LogStreamCursor cursor = headers.isEmpty() ? query : LogStreamCursor.parse(headers.getFirst());
     cursor.validate(store.head());
     return streams.connect(cursor);
   }

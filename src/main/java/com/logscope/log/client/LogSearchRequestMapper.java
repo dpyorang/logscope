@@ -12,7 +12,7 @@ public final class LogSearchRequestMapper {
 
   /** 검증한 검색 조건을 정확한 필터·Nori AND 검색·최신순 정렬의 ES 요청으로 바꾼다. */
   public static Map<String, Object> body(LogSearchQuery query) {
-    var filters = new ArrayList<Map<String, Object>>();
+    ArrayList<Map<String, Object>> filters = new ArrayList<Map<String, Object>>();
     filters.add(
         Map.of(
             "range",
