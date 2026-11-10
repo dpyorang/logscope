@@ -10,6 +10,7 @@ import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.util.LinkedMultiValueMap;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 class LogServiceTests {
@@ -20,10 +21,10 @@ class LogServiceTests {
 
   @Test
   void distinguishesStoredAndDuplicateWithoutChangingOriginalEvent() {
-    var repository = mock(LogRepository.class);
+    LogRepository repository = mock(LogRepository.class);
     when(repository.insert(event)).thenReturn(true, false);
-    var service = new LogService(repository);
-    var body = JsonMapper.builder().build().valueToTree(event.detail());
+    LogService service = new LogService(repository);
+    JsonNode body = JsonMapper.builder().build().valueToTree(event.detail());
     assertThat(service.collect(body).status()).isEqualTo("STORED");
     assertThat(service.collect(body).status()).isEqualTo("DUPLICATE");
     verify(repository, times(2)).insert(event);
@@ -31,12 +32,12 @@ class LogServiceTests {
 
   @Test
   void invalidInputDoesNotReachRepositoryAndDetailsKeepOriginalException() {
-    var repository = mock(LogRepository.class);
-    var service = new LogService(repository);
+    LogRepository repository = mock(LogRepository.class);
+    LogService service = new LogService(repository);
     assertThatThrownBy(() -> service.collect(null)).isInstanceOf(LogApiException.class);
     assertThatThrownBy(() -> service.detail("invalid")).isInstanceOf(LogApiException.class);
     verifyNoInteractions(repository);
-    var failed =
+    LogEvent failed =
         new LogEvent(ID, event.occurredAt(), "sample-was", "was-1", "ERROR", "합성 결제 오류", "합성 원인");
     when(repository.find(ID)).thenReturn(failed);
     assertThat(service.detail(ID).exception()).isEqualTo("합성 원인");
@@ -44,9 +45,9 @@ class LogServiceTests {
 
   @Test
   void listKeepsUnsupportedFiltersAndPaginationErrorsInsteadOfTruncatingSilently() {
-    var repository = mock(LogRepository.class);
-    var service = new LogService(repository);
-    var params = new LinkedMultiValueMap<String, String>();
+    LogRepository repository = mock(LogRepository.class);
+    LogService service = new LogService(repository);
+    LinkedMultiValueMap<String, String> params = new LinkedMultiValueMap<String, String>();
     params.add("from", "2026-10-28T00:00:00Z");
     params.add("to", "2026-10-29T00:00:00Z");
     params.add("size", "1");

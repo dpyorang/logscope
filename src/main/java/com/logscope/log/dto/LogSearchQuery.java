@@ -19,8 +19,8 @@ public record LogSearchQuery(
       if (params.getFirst(key) == null || params.getFirst(key).isBlank())
         throw new LogApiException(key, "REQUIRED");
     }
-    var from = LogInput.time(params.getFirst("from"), "from");
-    var to = LogInput.time(params.getFirst("to"), "to");
+    Instant from = LogInput.time(params.getFirst("from"), "from");
+    Instant to = LogInput.time(params.getFirst("to"), "to");
     if (!from.isBefore(to) || Duration.between(from, to).compareTo(Duration.ofHours(24)) > 0)
       throw new LogApiException("to", "OUT_OF_RANGE");
     String instance = params.getFirst("instanceId"),

@@ -45,8 +45,9 @@ class LogInputTests {
 
   @Test
   void preservesFieldsWhitespaceAndTrace() {
-    var node = valid().put("exception", "SyntheticException\n\tat sample.run(Sample.java:1)");
-    var result = LogInput.parse(node);
+    ObjectNode node =
+        valid().put("exception", "SyntheticException\n\tat sample.run(Sample.java:1)");
+    LogEvent result = LogInput.parse(node);
     assertThat(result)
         .isEqualTo(
             new LogEvent(
@@ -62,7 +63,7 @@ class LogInputTests {
   @ParameterizedTest
   @ValueSource(strings = {"eventId", "occurredAt", "serviceName", "instanceId", "level", "message"})
   void rejectsMissingNullBlankAndNonStringRequiredFields(String field) {
-    var missing = valid();
+    ObjectNode missing = valid();
     missing.remove(field);
     rejects(() -> LogInput.parse(missing), field, "REQUIRED");
     rejects(() -> LogInput.parse(valid().putNull(field)), field, "REQUIRED");

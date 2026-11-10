@@ -12,6 +12,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.function.Consumer;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 
 class LogSearchIndexerTests {
   private final LogSearchRepository repository = mock(LogSearchRepository.class);
@@ -51,12 +52,12 @@ class LogSearchIndexerTests {
   @Test
   void acknowledgesOnlySuccessfulItemsAndRetriesFailuresInsideStateLock() {
     locked("new-index");
-    var first = row("synthetic-one", 0);
-    var second = row("synthetic-two", 3);
+    LogSearchRepository.Pending first = row("synthetic-one", 0);
+    LogSearchRepository.Pending second = row("synthetic-two", 3);
     when(repository.readyBatch()).thenReturn(List.of(first, second));
     when(client.bulk(List.of(first.item(), second.item()))).thenReturn(List.of(true, false));
     indexer.runCycle();
-    var order = inOrder(repository, client);
+    InOrder order = inOrder(repository, client);
     order.verify(repository).withLockedState(any());
     order.verify(client).identity("synthetic-epoch", true);
     order.verify(repository).readyBatch();
@@ -71,11 +72,11 @@ class LogSearchIndexerTests {
   @Test
   void changedGenerationRebuildsBeforeReadingAndDoesNotAcknowledgeFailedBulk() {
     locked("old-index");
-    var pending = row("synthetic-one", 0);
+    LogSearchRepository.Pending pending = row("synthetic-one", 0);
     when(repository.readyBatch()).thenReturn(List.of(pending));
     when(client.bulk(any())).thenThrow(new LogSearchClient.Unavailable());
     indexer.runCycle();
-    var order = inOrder(repository);
+    InOrder order = inOrder(repository);
     order.verify(repository).withLockedState(any());
     order.verify(repository).rebuild("new-index");
     order.verify(repository).readyBatch();

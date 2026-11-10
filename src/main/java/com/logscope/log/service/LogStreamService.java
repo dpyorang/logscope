@@ -1,11 +1,13 @@
 package com.logscope.log.service;
 
 import com.logscope.log.domain.LogStreamCursor;
+import com.logscope.log.dto.LogResponses.StreamRow;
 import com.logscope.log.exception.LogApiException;
 import com.logscope.log.repository.LogRepository;
 import com.logscope.log.support.LogStreamSignal;
 import jakarta.annotation.PreDestroy;
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -43,11 +45,11 @@ public class LogStreamService {
   /** 용량을 확보하고 응답 종료와 작업자 종료가 모두 확인될 때 연결 슬롯을 반환한다. */
   public synchronized SseEmitter connect(LogStreamCursor cursor) {
     if (stopped || !slots.tryAcquire()) throw new LogApiException(503, "LIVE_CAPACITY_EXCEEDED");
-    var emitter = emitters.get();
-    var closed = new AtomicBoolean();
-    var workerDone = new AtomicBoolean();
-    var responseDone = new AtomicBoolean();
-    var released = new AtomicBoolean();
+    SseEmitter emitter = emitters.get();
+    AtomicBoolean closed = new AtomicBoolean();
+    AtomicBoolean workerDone = new AtomicBoolean();
+    AtomicBoolean responseDone = new AtomicBoolean();
+    AtomicBoolean released = new AtomicBoolean();
     Runnable release =
         () -> {
           if (workerDone.get() && responseDone.get() && released.compareAndSet(false, true))
@@ -87,7 +89,7 @@ public class LogStreamService {
 
   /** 저장된 로그를 replay하고 새 commit 신호·heartbeat를 기다리며 전송 한도를 지킨다. */
   private void pump(SseEmitter emitter, LogStreamCursor start, AtomicBoolean closed) {
-    var cursor = start;
+    LogStreamCursor cursor = start;
     long deadline = System.nanoTime() + java.time.Duration.ofSeconds(55).toNanos();
     int delivered = 0;
     try {
@@ -98,8 +100,8 @@ public class LogStreamService {
               .data(Map.of("cursor", cursor.toString())));
       while (!closed.get() && delivered < 128 && System.nanoTime() < deadline) {
         long observed = signal.version();
-        var rows = store.after(cursor);
-        for (var row : rows) {
+        List<StreamRow> rows = store.after(cursor);
+        for (StreamRow row : rows) {
           if (closed.get() || delivered == 128) return;
           emitter.send(SseEmitter.event().name("log").id(row.cursor()).data(row));
           cursor = LogStreamCursor.parse(row.cursor());

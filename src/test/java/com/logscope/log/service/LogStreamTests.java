@@ -22,7 +22,7 @@ class LogStreamTests {
   @Test
   void cursorAcceptsZeroAndMaximumAndRejectsMalformedAndOverflow() {
     for (long value : new long[] {0, 1, Long.MAX_VALUE}) {
-      var cursor = LogStreamCursor.parse(EPOCH + ":" + value);
+      LogStreamCursor cursor = LogStreamCursor.parse(EPOCH + ":" + value);
       assertThat(cursor.sequence()).isEqualTo(value);
       assertThat(cursor.toString()).isEqualTo(EPOCH + ":" + value);
     }
@@ -42,7 +42,7 @@ class LogStreamTests {
 
   @Test
   void differentEpochAndFutureAreRecoveryErrors() {
-    var head = new LogStreamCursor(EPOCH, 10);
+    LogStreamCursor head = new LogStreamCursor(EPOCH, 10);
     new LogStreamCursor(EPOCH, 0).validate(head);
     assertThatThrownBy(() -> new LogStreamCursor(EPOCH, 11).validate(head))
         .hasMessage("LIVE_CURSOR_AHEAD");
@@ -52,12 +52,12 @@ class LogStreamTests {
 
   @Test
   void headerTakesPrecedenceButBothInputsMustBeValid() {
-    var store = mock(LogRepository.class);
-    var streams = mock(LogStreamService.class);
-    var controller = new LogLiveController(new LogLiveService(store, streams));
-    var params = new LinkedMultiValueMap<String, String>();
+    LogRepository store = mock(LogRepository.class);
+    LogStreamService streams = mock(LogStreamService.class);
+    LogLiveController controller = new LogLiveController(new LogLiveService(store, streams));
+    LinkedMultiValueMap<String, String> params = new LinkedMultiValueMap<String, String>();
     params.add("after", EPOCH + ":1");
-    var request = new MockHttpServletRequest();
+    MockHttpServletRequest request = new MockHttpServletRequest();
     request.addHeader("Last-Event-ID", EPOCH + ":2");
     when(store.head()).thenReturn(new LogStreamCursor(EPOCH, 3));
     controller.stream(params, request);
@@ -68,10 +68,10 @@ class LogStreamTests {
 
   @Test
   void unknownDuplicateAndSnapshotQueriesAreRejected() {
-    var controller =
+    LogLiveController controller =
         new LogLiveController(
             new LogLiveService(mock(LogRepository.class), mock(LogStreamService.class)));
-    var params = new LinkedMultiValueMap<String, String>();
+    LinkedMultiValueMap<String, String> params = new LinkedMultiValueMap<String, String>();
     assertThatThrownBy(() -> controller.stream(params, new MockHttpServletRequest()))
         .isInstanceOf(LogApiException.class);
     params.add("after", EPOCH + ":0");
@@ -83,7 +83,7 @@ class LogStreamTests {
 
   @Test
   void signalChangedBetweenReadAndWaitDoesNotSleep() throws Exception {
-    var signal = new LogStreamSignal();
+    LogStreamSignal signal = new LogStreamSignal();
     long observed = signal.version();
     signal.changed();
     assertThat(signal.version()).isGreaterThan(observed);
@@ -97,9 +97,9 @@ class LogStreamTests {
 
   @Test
   void streamsLimitConnectionsAndReleaseWorkersOnShutdown() throws Exception {
-    var store = mock(LogRepository.class);
+    LogRepository store = mock(LogRepository.class);
     when(store.after(any())).thenReturn(List.of());
-    var service = new LogStreamService(store, new LogStreamSignal(), TestEmitter::new);
+    LogStreamService service = new LogStreamService(store, new LogStreamSignal(), TestEmitter::new);
     try {
       for (int i = 0; i < 32; i++) service.connect(new LogStreamCursor(EPOCH, 0));
       assertThatThrownBy(() -> service.connect(new LogStreamCursor(EPOCH, 0)))
@@ -115,10 +115,10 @@ class LogStreamTests {
 
   @Test
   void storageFailureClosesInsteadOfLeakingSlot() throws Exception {
-    var store = mock(LogRepository.class);
+    LogRepository store = mock(LogRepository.class);
     when(store.after(any()))
         .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("synthetic"));
-    var service = new LogStreamService(store, new LogStreamSignal(), TestEmitter::new);
+    LogStreamService service = new LogStreamService(store, new LogStreamSignal(), TestEmitter::new);
     service.connect(new LogStreamCursor(EPOCH, 0));
     awaitClosed(service);
     service.shutdown();
@@ -126,8 +126,8 @@ class LogStreamTests {
 
   @Test
   void replayBudgetBoundsPreInitializationBuffer() throws Exception {
-    var store = mock(LogRepository.class);
-    var item =
+    LogRepository store = mock(LogRepository.class);
+    LogEvent.Summary item =
         new LogEvent(
                 "00000000-0000-4000-8000-000000000002",
                 Instant.EPOCH,
@@ -140,13 +140,13 @@ class LogStreamTests {
     when(store.after(any()))
         .thenAnswer(
             invocation -> {
-              var after = (LogStreamCursor) invocation.getArgument(0);
+              LogStreamCursor after = (LogStreamCursor) invocation.getArgument(0);
               return java.util.stream.LongStream.rangeClosed(
                       after.sequence() + 1, after.sequence() + 50)
                   .mapToObj(seq -> new LogResponses.StreamRow(EPOCH + ":" + seq, item))
                   .toList();
             });
-    var service = new LogStreamService(store, new LogStreamSignal(), TestEmitter::new);
+    LogStreamService service = new LogStreamService(store, new LogStreamSignal(), TestEmitter::new);
     service.connect(new LogStreamCursor(EPOCH, 0));
     awaitClosed(service);
     verify(store, times(3)).after(any());
@@ -155,8 +155,8 @@ class LogStreamTests {
 
   @Test
   void exclusiveSnapshotEndIncludesCurrentMillisecondAcrossSecondBoundary() {
-    var occurrence = Instant.parse("2026-10-28T00:00:00.999Z");
-    var end = LogRepository.snapshotEnd(occurrence.plusNanos(123456));
+    Instant occurrence = Instant.parse("2026-10-28T00:00:00.999Z");
+    Instant end = LogRepository.snapshotEnd(occurrence.plusNanos(123456));
     assertThat(occurrence).isBefore(end);
     assertThat(end).isEqualTo(Instant.parse("2026-10-28T00:00:01.000Z"));
     assertThat(LogRepository.snapshotEnd(occurrence)).isEqualTo(end);
@@ -172,15 +172,15 @@ class LogStreamTests {
 
   @Test
   void completedWorkerDoesNotReleaseSlotBeforeHttpResponseCompletes() throws Exception {
-    var store = mock(LogRepository.class);
+    LogRepository store = mock(LogRepository.class);
     when(store.after(any()))
         .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("synthetic"));
-    var transport =
+    TestEmitter transport =
         new TestEmitter() {
           @Override
           public void complete() {}
         };
-    var service = new LogStreamService(store, new LogStreamSignal(), () -> transport);
+    LogStreamService service = new LogStreamService(store, new LogStreamSignal(), () -> transport);
     service.connect(new LogStreamCursor(EPOCH, 0));
     verify(store, timeout(3000)).after(any());
     assertThat(service.activeConnections()).isEqualTo(1);

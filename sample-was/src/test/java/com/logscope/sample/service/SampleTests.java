@@ -3,6 +3,7 @@ package com.logscope.sample.service;
 import static org.assertj.core.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
@@ -12,13 +13,14 @@ import com.logscope.sample.logging.JsonLogEncoder;
 import java.util.HashSet;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
 class SampleTests {
   @Test
   void generatesAllLevelsWithStableIdsAndSingleLineJsonIncludingStackTrace() {
     Logger logger = (Logger) LoggerFactory.getLogger("SAMPLE_EVENTS");
-    var appender =
+    ListAppender<ILoggingEvent> appender =
         new ListAppender<ILoggingEvent>() {
           @Override
           protected void append(ILoggingEvent event) {
@@ -29,19 +31,19 @@ class SampleTests {
     appender.start();
     logger.addAppender(appender);
     logger.setLevel(ch.qos.logback.classic.Level.TRACE);
-    var encoder = new JsonLogEncoder();
+    JsonLogEncoder encoder = new JsonLogEncoder();
     encoder.setInstanceId("was-2");
-    var ids = new HashSet<String>();
+    HashSet<String> ids = new HashSet<String>();
     try {
-      var generator = new EventGenerator();
+      EventGenerator generator = new EventGenerator();
       for (String level : EventGenerator.LEVELS) {
         String id = generator.generate(level, level.equals("ERROR"), "MANUAL");
         assertThat(ids.add(id)).isTrue();
         assertThat(java.util.UUID.fromString(id).version()).isEqualTo(4);
-        var event = appender.list.getLast();
+        ILoggingEvent event = appender.list.getLast();
         // The appender freezes MDC while the eventId is still in scope.
-        var bytes = encoder.encode(event);
-        var json = JsonMapper.builder().build().readTree(bytes);
+        byte[] bytes = encoder.encode(event);
+        JsonNode json = JsonMapper.builder().build().readTree(bytes);
         assertThat(json.get("eventId").asString()).isEqualTo(id);
         assertThat(json.get("level").asString()).isEqualTo(level);
         assertThat(json.get("instanceId").asString()).isEqualTo("was-2");
@@ -61,7 +63,7 @@ class SampleTests {
           .isInstanceOf(IllegalArgumentException.class);
       for (int i = 0; i < 20; i++) {
         String id = generator.random("AUTO");
-        var event = appender.list.getLast();
+        ILoggingEvent event = appender.list.getLast();
         assertThat(EventGenerator.LEVELS).contains(event.getLevel().toString());
         assertThat(event.getMDCPropertyMap()).containsEntry("eventId", id);
         assertThat(event.getFormattedMessage()).startsWith("[AUTO] [합성]");
@@ -77,10 +79,10 @@ class SampleTests {
 
   @Test
   void controllerHonorsPauseAndRoutesManualChoicesWithoutClaimingCentralStorage() {
-    var generator = mock(EventGenerator.class);
+    EventGenerator generator = mock(EventGenerator.class);
     when(generator.random("AUTO")).thenReturn("synthetic");
     when(generator.random("MANUAL")).thenReturn("synthetic");
-    var controller = new SampleService(generator, "was-1", 30000);
+    SampleService controller = new SampleService(generator, "was-1", 30000);
     assertThat(controller.status()).containsEntry("intervalSeconds", 30L);
     assertThat(controller.scenarios()).hasSize(20);
     controller.tick();
@@ -101,7 +103,7 @@ class SampleTests {
   @Test
   void everyCommerceScenarioHasStableCodeAndRealisticContextWithoutChangingEnvelope() {
     Logger logger = (Logger) LoggerFactory.getLogger("SAMPLE_EVENTS");
-    var appender =
+    ListAppender<ILoggingEvent> appender =
         new ListAppender<ILoggingEvent>() {
           @Override
           protected void append(ILoggingEvent event) {
@@ -111,21 +113,22 @@ class SampleTests {
         };
     appender.start();
     logger.addAppender(appender);
-    var previous = logger.getLevel();
+    Level previous = logger.getLevel();
     logger.setLevel(ch.qos.logback.classic.Level.TRACE);
-    var encoder = new JsonLogEncoder();
+    JsonLogEncoder encoder = new JsonLogEncoder();
     encoder.setInstanceId("was-1");
-    var generator = new EventGenerator();
-    var codes = new HashSet<String>();
+    EventGenerator generator = new EventGenerator();
+    HashSet<String> codes = new HashSet<String>();
     try {
-      for (var scenario : CommerceScenarios.ALL) {
+      for (CommerceScenarios.Scenario scenario : CommerceScenarios.ALL) {
         assertThat(codes.add(scenario.code())).isTrue();
         assertThat(scenario.code()).matches("[A-Z_]+");
         assertThat(scenario.detail()).contains("synthetic-");
-        var id =
+        String id =
             generator.generate(
                 scenario.level(), scenario.level().equals("ERROR"), "MANUAL", scenario.code());
-        var data = JsonMapper.builder().build().readTree(encoder.encode(appender.list.getLast()));
+        JsonNode data =
+            JsonMapper.builder().build().readTree(encoder.encode(appender.list.getLast()));
         assertThat(data.size()).isEqualTo(7);
         assertThat(data.path("eventId").asString()).isEqualTo(id);
         assertThat(data.path("message").asString()).isEqualTo("[MANUAL] " + scenario.message());
@@ -160,8 +163,8 @@ class SampleTests {
 
   @Test
   void scenarioSelectionRejectsContradictoryRequestsAndIntervalStatusUsesConfiguration() {
-    var generator = mock(EventGenerator.class);
-    var controller = new SampleService(generator, "was-2", 45000);
+    EventGenerator generator = mock(EventGenerator.class);
+    SampleService controller = new SampleService(generator, "was-2", 45000);
     assertThat(controller.status()).containsEntry("intervalSeconds", 45L);
     when(generator.generate("ERROR", true, "MANUAL", "PAYMENT_TIMEOUT")).thenReturn("synthetic");
     assertThat(controller.create(new SampleRequests.Input("ERROR", true, "PAYMENT_TIMEOUT")))

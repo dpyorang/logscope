@@ -90,11 +90,11 @@ public class LogRepository {
     return transactions.execute(
         status -> {
           // First consistent read establishes one repeatable-read view for both head and rows.
-          var cursor = head();
+          LogStreamCursor cursor = head();
           // Determine the time window after the read view, including the current millisecond.
-          var now = snapshotEnd(Instant.now());
-          var from = now.minus(java.time.Duration.ofHours(24));
-          var rows = list(from, now, 50);
+          Instant now = snapshotEnd(Instant.now());
+          Instant from = now.minus(java.time.Duration.ofHours(24));
+          List<LogEvent> rows = list(from, now, 50);
           return new LiveSnapshot(
               rows.stream().limit(50).map(LogEvent::summary).toList(),
               cursor.toString(),

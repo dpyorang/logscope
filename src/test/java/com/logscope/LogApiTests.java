@@ -3,12 +3,21 @@ package com.logscope;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.logscope.config.TestcontainersConfiguration;
+import com.zaxxer.hikari.HikariDataSource;
+import java.io.BufferedReader;
+import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -39,7 +48,7 @@ class LogApiTests {
   }
 
   private Map<String, Object> event(String id) {
-    var result = new LinkedHashMap<String, Object>();
+    LinkedHashMap<String, Object> result = new LinkedHashMap<String, Object>();
     result.put("eventId", id);
     result.put("occurredAt", "2026-10-27T03:00:00.123Z");
     result.put("serviceName", "sample-was");
@@ -54,7 +63,7 @@ class LogApiTests {
 
   private HttpResponse<String> send(String method, String path, String body, String contentType)
       throws Exception {
-    var builder =
+    HttpRequest.Builder builder =
         HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/logs" + path));
     if (body == null) builder.GET();
     else
@@ -81,13 +90,13 @@ class LogApiTests {
 
   @Test
   void batchStoresValidItemsAndRejectsPoisonWithoutLosingOthers() throws Exception {
-    var good = event(UUID.randomUUID().toString());
-    var invalid = event(UUID.randomUUID().toString());
+    Map<String, Object> good = event(UUID.randomUUID().toString());
+    Map<String, Object> invalid = event(UUID.randomUUID().toString());
     invalid.put("level", "INVALID");
-    var conflict = new LinkedHashMap<>(good);
+    LinkedHashMap<String, Object> conflict = new LinkedHashMap<>(good);
     conflict.put("message", "Different synthetic value");
-    var body = json.writeValueAsString(java.util.List.of(good, good, invalid, conflict));
-    var result = send("POST", "/batch", body, "application/json");
+    String body = json.writeValueAsString(java.util.List.of(good, good, invalid, conflict));
+    HttpResponse<String> result = send("POST", "/batch", body, "application/json");
     assertThat(result.statusCode()).isEqualTo(200);
     assertThat(tree(result).get("stored").asInt()).isEqualTo(1);
     assertThat(tree(result).get("duplicates").asInt()).isEqualTo(1);
@@ -104,7 +113,7 @@ class LogApiTests {
   void batchEnforcesEnvelopeCountAndByteLimits() throws Exception {
     for (String body : java.util.List.of("[]", "{}", "[" + "{},".repeat(100) + "{}]"))
       problem(send("POST", "/batch", body, "application/json"), 400, "VALIDATION_ERROR");
-    var hundred =
+    List<Map<String, Object>> hundred =
         java.util.stream.IntStream.range(0, 100)
             .mapToObj(i -> event(UUID.randomUUID().toString()))
             .toList();
@@ -120,15 +129,15 @@ class LogApiTests {
   @Test
   void storesAndReadsSyntheticLogThroughRealHttpAndMysql() throws Exception {
     String id = "7b2a8c30-8d94-4d5f-a6d8-931cf6a6a101";
-    var input = event(id);
-    var saved = post(input);
+    Map<String, Object> input = event(id);
+    HttpResponse<String> saved = post(input);
     assertThat(saved.statusCode()).isEqualTo(201);
     assertThat(saved.headers().firstValue("location")).hasValue("/api/v1/logs/" + id);
     assertThat(tree(saved).get("status").asString()).isEqualTo("STORED");
-    var detail = send("GET", "/" + id, null, "");
+    HttpResponse<String> detail = send("GET", "/" + id, null, "");
     assertThat(detail.statusCode()).isEqualTo(200);
     assertThat(tree(detail)).isEqualTo(json.valueToTree(input));
-    var listing = send("GET", RANGE, null, "");
+    HttpResponse<String> listing = send("GET", RANGE, null, "");
     assertThat(listing.statusCode()).isEqualTo(200);
     assertThat(tree(listing).get("items").size()).isEqualTo(1);
     assertThat(tree(listing).get("items").get(0).get("hasException").asBoolean()).isTrue();
@@ -140,16 +149,16 @@ class LogApiTests {
   @Test
   void normalizesMillisecondsAndAbsentExceptionForIdempotency() throws Exception {
     String id = UUID.randomUUID().toString();
-    var input = event(id);
+    Map<String, Object> input = event(id);
     input.put("occurredAt", "2026-10-27T03:00:00Z");
     input.remove("exception");
     assertThat(post(input).statusCode()).isEqualTo(201);
     input.put("occurredAt", "2026-10-27T03:00:00.000Z");
     input.put("exception", null);
-    var duplicate = post(input);
+    HttpResponse<String> duplicate = post(input);
     assertThat(duplicate.statusCode()).isEqualTo(200);
     assertThat(tree(duplicate).get("status").asString()).isEqualTo("DUPLICATE");
-    var detail = tree(send("GET", "/" + id, null, ""));
+    JsonNode detail = tree(send("GET", "/" + id, null, ""));
     assertThat(detail.get("occurredAt").asString()).isEqualTo("2026-10-27T03:00:00.000Z");
     assertThat(detail.get("exception").isNull()).isTrue();
   }
@@ -157,7 +166,7 @@ class LogApiTests {
   @Test
   void conflictDoesNotOverwriteOriginal() throws Exception {
     String id = UUID.randomUUID().toString();
-    var input = event(id);
+    Map<String, Object> input = event(id);
     post(input);
     input.put("message", "Different synthetic message");
     problem(post(input), 409, "EVENT_ID_CONFLICT");
@@ -167,8 +176,9 @@ class LogApiTests {
 
   @Test
   void concurrentIdenticalRequestsCreateExactlyOneRow() throws Exception {
-    var input = event(UUID.randomUUID().toString());
-    var tasks = new ArrayList<CompletableFuture<HttpResponse<String>>>();
+    Map<String, Object> input = event(UUID.randomUUID().toString());
+    ArrayList<CompletableFuture<HttpResponse<String>>> tasks =
+        new ArrayList<CompletableFuture<HttpResponse<String>>>();
     for (int i = 0; i < 8; i++) {
       tasks.add(
           CompletableFuture.supplyAsync(
@@ -180,7 +190,7 @@ class LogApiTests {
                 }
               }));
     }
-    var responses = tasks.stream().map(CompletableFuture::join).toList();
+    List<HttpResponse<String>> responses = tasks.stream().map(CompletableFuture::join).toList();
     assertThat(responses.stream().filter(r -> r.statusCode() == 201).count()).isEqualTo(1);
     assertThat(responses.stream().filter(r -> r.statusCode() == 200).count()).isEqualTo(7);
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM log_events", Integer.class)).isEqualTo(1);
@@ -207,7 +217,7 @@ class LogApiTests {
                 "extra",
                 "synthetic")
             .entrySet()) {
-      var input = event(UUID.randomUUID().toString());
+      Map<String, Object> input = event(UUID.randomUUID().toString());
       input.put(invalid.getKey(), invalid.getValue());
       problem(post(input), 400, "VALIDATION_ERROR");
     }
@@ -218,11 +228,11 @@ class LogApiTests {
           "2026-10-27T03:00:60Z",
           "0999-01-01T00:00:00Z"
         }) {
-      var input = event(UUID.randomUUID().toString());
+      Map<String, Object> input = event(UUID.randomUUID().toString());
       input.put("occurredAt", time);
       problem(post(input), 400, "VALIDATION_ERROR");
     }
-    var input = event(UUID.randomUUID().toString());
+    Map<String, Object> input = event(UUID.randomUUID().toString());
     input.remove("message");
     problem(post(input), 400, "VALIDATION_ERROR");
     assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM log_events", Integer.class)).isZero();
@@ -231,7 +241,7 @@ class LogApiTests {
   @Test
   void preservesMaximumUnicodeAndTraceWithoutTruncation() throws Exception {
     String id = UUID.randomUUID().toString();
-    var input = event(id);
+    Map<String, Object> input = event(id);
     input.put("message", "😀".repeat(4096));
     input.put("exception", "😀".repeat(32768));
     assertThat(post(input).statusCode()).isEqualTo(201);
@@ -245,10 +255,10 @@ class LogApiTests {
 
   @Test
   void enforcesActualBodyLimitEvenWithoutContentLength() throws Exception {
-    var input = event(UUID.randomUUID().toString());
+    Map<String, Object> input = event(UUID.randomUUID().toString());
     input.put("message", "a".repeat(262144));
     byte[] body = json.writeValueAsBytes(input);
-    var request =
+    HttpRequest request =
         HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/logs"))
             .header("Content-Type", "application/json")
             .POST(
@@ -265,7 +275,7 @@ class LogApiTests {
         raw + " ".repeat(262144 - raw.getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
     assertThat(send("POST", "", exact, "application/json").statusCode()).isEqualTo(201);
     problem(send("POST", "", exact + " ", "application/json"), 413, "PAYLOAD_TOO_LARGE");
-    var invalidUtf8 =
+    HttpRequest invalidUtf8 =
         HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/logs"))
             .header("Content-Type", "application/json")
             .POST(HttpRequest.BodyPublishers.ofByteArray(new byte[] {(byte) 0xc3, (byte) 0x28}))
@@ -282,7 +292,7 @@ class LogApiTests {
         400,
         "MALFORMED_JSON");
     problem(send("POST", "", "{}", "text/plain"), 415, "UNSUPPORTED_MEDIA_TYPE");
-    var request =
+    HttpRequest request =
         HttpRequest.newBuilder(URI.create("http://localhost:" + port + "/api/v1/logs"))
             .header("Content-Type", "application/json")
             .header("Content-Encoding", "gzip")
@@ -320,23 +330,23 @@ class LogApiTests {
 
   @Test
   void timeBoundsAreHalfOpenAndOrderingIsStable() throws Exception {
-    var first = event("00000000-0000-4000-8000-000000000001");
+    Map<String, Object> first = event("00000000-0000-4000-8000-000000000001");
     first.put("occurredAt", "2026-10-27T00:00:00Z");
     post(first);
-    var second = event("00000000-0000-4000-8000-000000000002");
+    Map<String, Object> second = event("00000000-0000-4000-8000-000000000002");
     second.put("occurredAt", "2026-10-27T00:00:00Z");
     post(second);
-    var excluded = event(UUID.randomUUID().toString());
+    Map<String, Object> excluded = event(UUID.randomUUID().toString());
     excluded.put("occurredAt", "2026-10-28T00:00:00Z");
     post(excluded);
-    var items = tree(send("GET", RANGE, null, "")).get("items");
+    JsonNode items = tree(send("GET", RANGE, null, "")).get("items");
     assertThat(items.size()).isEqualTo(2);
     assertThat(items.get(0).get("eventId").asString()).isEqualTo(second.get("eventId"));
     problem(send("GET", RANGE + "&size=1", null, ""), 501, "PAGINATION_NOT_IMPLEMENTED");
   }
 
   private Map<String, Object> liveEvent() {
-    var body = event(UUID.randomUUID().toString());
+    Map<String, Object> body = event(UUID.randomUUID().toString());
     body.put(
         "occurredAt",
         java.time.Instant.now()
@@ -353,7 +363,7 @@ class LogApiTests {
             () -> {
               try {
                 String type = "", id = "";
-                var data = new StringBuilder();
+                StringBuilder data = new StringBuilder();
                 while (true) {
                   String line = reader.readLine();
                   if (line == null)
@@ -374,7 +384,7 @@ class LogApiTests {
   }
 
   private HttpResponse<java.io.InputStream> connect(String cursor, String lastId) throws Exception {
-    var builder =
+    HttpRequest.Builder builder =
         HttpRequest.newBuilder(
             URI.create("http://localhost:" + port + "/api/v1/logs/stream?after=" + cursor));
     if (lastId != null) builder.header("Last-Event-ID", lastId);
@@ -383,47 +393,47 @@ class LogApiTests {
 
   @Test
   void snapshotConnectionGapLiveDeliveryReconnectAndDuplicateAreSafe() throws Exception {
-    var first = liveEvent();
+    Map<String, Object> first = liveEvent();
     assertThat(post(first).statusCode()).isEqualTo(201);
-    var snapshot = tree(send("GET", "/live", null, ""));
+    JsonNode snapshot = tree(send("GET", "/live", null, ""));
     String start = snapshot.get("cursor").asString();
     assertThat(snapshot.get("items").size()).isEqualTo(1);
-    var late = liveEvent();
+    Map<String, Object> late = liveEvent();
     late.put("occurredAt", "2026-01-01T00:00:00Z");
     assertThat(post(late).statusCode()).isEqualTo(201);
     assertThat(post(late).statusCode()).isEqualTo(200);
     String received;
-    var response = connect(start, null);
+    HttpResponse<InputStream> response = connect(start, null);
     assertThat(response.statusCode()).isEqualTo(200);
     assertThat(response.headers().firstValue("content-type").orElseThrow())
         .contains("text/event-stream");
     assertThat(response.headers().firstValue("cache-control").orElseThrow()).contains("no-store");
-    try (var input = response.body();
-        var reader =
+    try (InputStream input = response.body();
+        BufferedReader reader =
             new java.io.BufferedReader(
                 new java.io.InputStreamReader(input, java.nio.charset.StandardCharsets.UTF_8))) {
       assertThat(frame(reader).event()).isEqualTo("ready");
-      var replay = frame(reader);
+      Frame replay = frame(reader);
       received = replay.id();
       assertThat(json.readTree(replay.data()).get("item").get("eventId").asString())
           .isEqualTo(late.get("eventId"));
-      var live = liveEvent();
+      Map<String, Object> live = liveEvent();
       post(live);
-      var pushed = frame(reader);
+      Frame pushed = frame(reader);
       assertThat(json.readTree(pushed.data()).get("item").get("eventId").asString())
           .isEqualTo(live.get("eventId"));
       received = pushed.id();
     }
     // Pause closes the stream. Resume with the last processed ID, after a new stored event.
-    var paused = liveEvent();
+    Map<String, Object> paused = liveEvent();
     post(paused);
-    var resumed = connect(start, received);
-    try (var input = resumed.body();
-        var reader =
+    HttpResponse<InputStream> resumed = connect(start, received);
+    try (InputStream input = resumed.body();
+        BufferedReader reader =
             new java.io.BufferedReader(
                 new java.io.InputStreamReader(input, java.nio.charset.StandardCharsets.UTF_8))) {
       assertThat(json.readTree(frame(reader).data()).get("cursor").asString()).isEqualTo(received);
-      var pushed = frame(reader);
+      Frame pushed = frame(reader);
       assertThat(json.readTree(pushed.data()).get("item").get("eventId").asString())
           .isEqualTo(paused.get("eventId"));
     }
@@ -432,10 +442,10 @@ class LogApiTests {
 
   @Test
   void liveSnapshotIsBoundedAndReplayContinuesAcrossConnectionBudget() throws Exception {
-    var empty = tree(send("GET", "/live", null, ""));
+    JsonNode empty = tree(send("GET", "/live", null, ""));
     String start = empty.get("cursor").asString();
     assertThat(empty.get("from").asString()).matches(".*\\.\\d{3}Z");
-    var events = new ArrayList<Map<String, Object>>();
+    ArrayList<Map<String, Object>> events = new ArrayList<Map<String, Object>>();
     for (int i = 0; i < 129; i++) events.add(liveEvent());
     for (int i = 0; i < events.size(); i += 100)
       assertThat(
@@ -446,19 +456,19 @@ class LogApiTests {
                       "application/json")
                   .statusCode())
           .isEqualTo(200);
-    var snapshot = tree(send("GET", "/live", null, ""));
+    JsonNode snapshot = tree(send("GET", "/live", null, ""));
     assertThat(snapshot.get("items").size()).isEqualTo(50);
     assertThat(snapshot.get("truncated").asBoolean()).isTrue();
-    var response = connect(start, null);
+    HttpResponse<InputStream> response = connect(start, null);
     String received = start;
-    var ids = new java.util.HashSet<String>();
-    try (var input = response.body();
-        var reader =
+    HashSet<String> ids = new java.util.HashSet<String>();
+    try (InputStream input = response.body();
+        BufferedReader reader =
             new java.io.BufferedReader(
                 new java.io.InputStreamReader(input, java.nio.charset.StandardCharsets.UTF_8))) {
       frame(reader);
       for (int i = 0; i < 128; i++) {
-        var next = frame(reader);
+        Frame next = frame(reader);
         received = next.id();
         assertThat(next.event()).isEqualTo("log");
         assertThat(ids.add(json.readTree(next.data()).get("item").get("eventId").asString()))
@@ -466,13 +476,13 @@ class LogApiTests {
       }
       assertThat(reader.readLine()).isNull();
     }
-    var resumed = connect(received, null);
-    try (var input = resumed.body();
-        var reader =
+    HttpResponse<InputStream> resumed = connect(received, null);
+    try (InputStream input = resumed.body();
+        BufferedReader reader =
             new java.io.BufferedReader(
                 new java.io.InputStreamReader(input, java.nio.charset.StandardCharsets.UTF_8))) {
       frame(reader);
-      var next = frame(reader);
+      Frame next = frame(reader);
       assertThat(ids.add(json.readTree(next.data()).get("item").get("eventId").asString()))
           .isTrue();
     }
@@ -500,9 +510,10 @@ class LogApiTests {
   @Test
   void concurrentCommitsHaveStableReplayOrderAndConflictsDoNotAdvanceHead() throws Exception {
     String start = tree(send("GET", "/live", null, "")).get("cursor").asString();
-    var tasks = new ArrayList<CompletableFuture<HttpResponse<String>>>();
+    ArrayList<CompletableFuture<HttpResponse<String>>> tasks =
+        new ArrayList<CompletableFuture<HttpResponse<String>>>();
     for (int i = 0; i < 8; i++) {
-      var value = liveEvent();
+      Map<String, Object> value = liveEvent();
       tasks.add(
           CompletableFuture.supplyAsync(
               () -> {
@@ -513,18 +524,19 @@ class LogApiTests {
                 }
               }));
     }
-    for (var task : tasks) assertThat(task.get().statusCode()).isEqualTo(201);
-    var sequences =
+    for (CompletableFuture<HttpResponse<String>> task : tasks)
+      assertThat(task.get().statusCode()).isEqualTo(201);
+    List<Long> sequences =
         jdbc.queryForList(
             "SELECT stream_sequence FROM log_events ORDER BY stream_sequence", Long.class);
     long base = Long.parseLong(start.substring(start.indexOf(':') + 1));
     assertThat(sequences)
         .containsExactlyElementsOf(
             java.util.stream.LongStream.rangeClosed(base + 1, base + 8).boxed().toList());
-    var id =
+    String id =
         jdbc.queryForObject(
             "SELECT event_id FROM log_events ORDER BY stream_sequence LIMIT 1", String.class);
-    var conflict = liveEvent();
+    Map<String, Object> conflict = liveEvent();
     conflict.put("eventId", id);
     problem(post(conflict), 409, "EVENT_ID_CONFLICT");
     assertThat(
@@ -536,12 +548,12 @@ class LogApiTests {
   @Test
   void pendingCommitCannotEscapeSnapshotThenAppearBehindCursor() throws Exception {
     String before = tree(send("GET", "/live", null, "")).get("cursor").asString();
-    var value = liveEvent();
+    Map<String, Object> value = liveEvent();
     CompletableFuture<HttpResponse<String>> writer;
-    try (var connection = jdbc.getDataSource().getConnection()) {
+    try (Connection connection = jdbc.getDataSource().getConnection()) {
       connection.setAutoCommit(false);
-      try (var lock = connection.createStatement();
-          var ignored =
+      try (Statement lock = connection.createStatement();
+          ResultSet ignored =
               lock.executeQuery(
                   "SELECT last_sequence FROM log_stream_state WHERE id=1 FOR UPDATE")) {
         writer =
@@ -553,20 +565,20 @@ class LogApiTests {
                     throw new RuntimeException(e);
                   }
                 });
-        var snapshot = tree(send("GET", "/live", null, ""));
+        JsonNode snapshot = tree(send("GET", "/live", null, ""));
         assertThat(snapshot.get("cursor").asString()).isEqualTo(before);
         assertThat(snapshot.get("items").size()).isZero();
         connection.commit();
       }
     }
     assertThat(writer.get(5, java.util.concurrent.TimeUnit.SECONDS).statusCode()).isEqualTo(201);
-    var response = connect(before, null);
-    try (var input = response.body();
-        var reader =
+    HttpResponse<InputStream> response = connect(before, null);
+    try (InputStream input = response.body();
+        BufferedReader reader =
             new java.io.BufferedReader(
                 new java.io.InputStreamReader(input, java.nio.charset.StandardCharsets.UTF_8))) {
       frame(reader);
-      var next = frame(reader);
+      Frame next = frame(reader);
       assertThat(json.readTree(next.data()).get("item").get("eventId").asString())
           .isEqualTo(value.get("eventId"));
     }
@@ -575,14 +587,14 @@ class LogApiTests {
   @Test
   void liveSnapshotExcludesExpiredAndFutureButReplayAdvancesAcrossBoth() throws Exception {
     String start = tree(send("GET", "/live", null, "")).get("cursor").asString();
-    var expired = liveEvent();
+    Map<String, Object> expired = liveEvent();
     expired.put(
         "occurredAt",
         java.time.Instant.now()
             .minusSeconds(86460)
             .truncatedTo(java.time.temporal.ChronoUnit.MILLIS)
             .toString());
-    var future = liveEvent();
+    Map<String, Object> future = liveEvent();
     future.put(
         "occurredAt",
         java.time.Instant.now()
@@ -592,9 +604,9 @@ class LogApiTests {
     post(expired);
     post(future);
     assertThat(tree(send("GET", "/live", null, "")).get("items").size()).isZero();
-    var response = connect(start, null);
-    try (var input = response.body();
-        var reader =
+    HttpResponse<InputStream> response = connect(start, null);
+    try (InputStream input = response.body();
+        BufferedReader reader =
             new java.io.BufferedReader(
                 new java.io.InputStreamReader(input, java.nio.charset.StandardCharsets.UTF_8))) {
       frame(reader);
@@ -609,8 +621,8 @@ class LogApiTests {
   void snapshotIncludesLogCommittedWhileWaitingForDatabaseConnection() throws Exception {
     long previous =
         jdbc.queryForObject("SELECT last_sequence FROM log_stream_state WHERE id=1", Long.class);
-    var pool = (com.zaxxer.hikari.HikariDataSource) jdbc.getDataSource();
-    var held = new ArrayList<java.sql.Connection>();
+    HikariDataSource pool = (com.zaxxer.hikari.HikariDataSource) jdbc.getDataSource();
+    ArrayList<Connection> held = new ArrayList<java.sql.Connection>();
     CompletableFuture<HttpResponse<String>> snapshot;
     String id = UUID.randomUUID().toString();
     try {
@@ -629,9 +641,9 @@ class LogApiTests {
           && System.nanoTime() < end) Thread.sleep(5);
       assertThat(pool.getHikariPoolMXBean().getThreadsAwaitingConnection()).isGreaterThan(0);
       Thread.sleep(20);
-      var connection = held.getFirst();
+      Connection connection = held.getFirst();
       connection.setAutoCommit(false);
-      try (var insert =
+      try (PreparedStatement insert =
           connection.prepareStatement(
               "INSERT INTO log_events (event_id,occurred_at,service_name,instance_id,level,message,stream_sequence) VALUES (?,?,'sample-was','was-1','INFO','Synthetic connection wait',?)")) {
         insert.setString(1, id);
@@ -645,16 +657,16 @@ class LogApiTests {
         insert.setLong(3, previous + 1);
         insert.executeUpdate();
       }
-      try (var update =
+      try (PreparedStatement update =
           connection.prepareStatement("UPDATE log_stream_state SET last_sequence=? WHERE id=1")) {
         update.setLong(1, previous + 1);
         update.executeUpdate();
       }
       connection.commit();
     } finally {
-      for (var connection : held) connection.close();
+      for (Connection connection : held) connection.close();
     }
-    var result = tree(snapshot.get(5, java.util.concurrent.TimeUnit.SECONDS));
+    JsonNode result = tree(snapshot.get(5, java.util.concurrent.TimeUnit.SECONDS));
     assertThat(result.get("items").size()).isEqualTo(1);
     assertThat(result.get("items").get(0).get("eventId").asString()).isEqualTo(id);
     assertThat(result.get("cursor").asString()).endsWith(":" + (previous + 1));

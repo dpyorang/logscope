@@ -157,7 +157,7 @@ public final class CommerceScenarios {
   public static Scenario select(String level, String code) {
     if (!LEVELS.contains(level)) throw new IllegalArgumentException("Invalid level");
     if (code != null) {
-      var selected =
+      Scenario selected =
           ALL.stream()
               .filter(s -> s.code().equals(code))
               .findFirst()
@@ -166,7 +166,7 @@ public final class CommerceScenarios {
         throw new IllegalArgumentException("Scenario level mismatch");
       return selected;
     }
-    var candidates = ALL.stream().filter(s -> s.level().equals(level)).toList();
+    List<Scenario> candidates = ALL.stream().filter(s -> s.level().equals(level)).toList();
     return candidates.get(ThreadLocalRandom.current().nextInt(candidates.size()));
   }
 

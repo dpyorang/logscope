@@ -5,11 +5,13 @@ import static org.assertj.core.api.Assertions.*;
 import com.logscope.log.domain.LogEvent;
 import com.logscope.log.dto.LogSearchQuery;
 import com.sun.net.httpserver.HttpServer;
+import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.springframework.util.LinkedMultiValueMap;
 
 class LogSearchClientTests {
   private final LogEvent.Summary event =
@@ -25,19 +27,19 @@ class LogSearchClientTests {
 
   private void withReply(int status, String body, java.util.function.Consumer<LogSearchClient> test)
       throws Exception {
-    var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext(
         "/",
         exchange -> {
           byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
           exchange.getResponseHeaders().set("Content-Type", "application/json");
           exchange.sendResponseHeaders(status, bytes.length);
-          try (var out = exchange.getResponseBody()) {
+          try (OutputStream out = exchange.getResponseBody()) {
             out.write(bytes);
           }
         });
     server.start();
-    var client =
+    LogSearchClient client =
         new LogSearchClient(
             true, "http://127.0.0.1:" + server.getAddress().getPort(), "logscope-logs-v1");
     try {
@@ -88,10 +90,11 @@ class LogSearchClientTests {
 
   @Test
   void failedShardsAndTimeoutsAreNotReportedAsSuccessfulEmptySearches() throws Exception {
-    var params = new org.springframework.util.LinkedMultiValueMap<String, String>();
+    LinkedMultiValueMap<String, String> params =
+        new org.springframework.util.LinkedMultiValueMap<String, String>();
     params.add("from", "2026-10-28T00:00:00Z");
     params.add("to", "2026-10-29T00:00:00Z");
-    var query = LogSearchQuery.parse(params);
+    LogSearchQuery query = LogSearchQuery.parse(params);
     for (String body :
         List.of(
             "{\"timed_out\":true,\"_shards\":{\"failed\":0},\"hits\":{\"hits\":[]}}",
@@ -110,7 +113,7 @@ class LogSearchClientTests {
         .isInstanceOf(IllegalArgumentException.class);
     assertThatThrownBy(() -> new LogSearchClient(true, "http://localhost:9200/other", "logs"))
         .isInstanceOf(IllegalArgumentException.class);
-    var disabled = new LogSearchClient(false, "http://localhost:9200", "logs");
+    LogSearchClient disabled = new LogSearchClient(false, "http://localhost:9200", "logs");
     try {
       assertThatThrownBy(() -> disabled.bulk(List.of(event)))
           .isInstanceOf(LogSearchClient.Unavailable.class);
@@ -121,14 +124,14 @@ class LogSearchClientTests {
 
   @Test
   void stalledResponseBodyIsCancelledWithinWholeRequestDeadline() throws Exception {
-    var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+    HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.setExecutor(java.util.concurrent.Executors.newVirtualThreadPerTaskExecutor());
     server.createContext(
         "/",
         exchange -> {
           exchange.getResponseHeaders().set("Content-Type", "application/json");
           exchange.sendResponseHeaders(200, 100);
-          try (var out = exchange.getResponseBody()) {
+          try (OutputStream out = exchange.getResponseBody()) {
             out.write('{');
             out.flush();
             Thread.sleep(6000);
@@ -137,7 +140,7 @@ class LogSearchClientTests {
           }
         });
     server.start();
-    var client =
+    LogSearchClient client =
         new LogSearchClient(true, "http://127.0.0.1:" + server.getAddress().getPort(), "logs");
     try {
       org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(

@@ -24,7 +24,7 @@ public class LogBodyReader {
   public tools.jackson.databind.JsonNode read(HttpServletRequest request, int limit)
       throws IOException {
     try {
-      var contentType =
+      MediaType contentType =
           MediaType.parseMediaType(
               request.getContentType() == null ? "" : request.getContentType());
       if (!contentType.getType().equalsIgnoreCase("application")

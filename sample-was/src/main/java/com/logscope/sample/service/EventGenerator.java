@@ -7,6 +7,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
 import org.slf4j.event.Level;
+import org.slf4j.spi.LoggingEventBuilder;
 import org.springframework.stereotype.Service;
 
 /** 합성 상황을 전용 Logback 로그 이벤트로 기록한다. */
@@ -26,10 +27,10 @@ public class EventGenerator {
       throw new IllegalArgumentException("Invalid sample level");
     if (!List.of("AUTO", "MANUAL").contains(origin))
       throw new IllegalArgumentException("Invalid origin");
-    var scenario = CommerceScenarios.select(level, scenarioCode);
+    CommerceScenarios.Scenario scenario = CommerceScenarios.select(level, scenarioCode);
     String id = UUID.randomUUID().toString();
-    try (var ignored = MDC.putCloseable("eventId", id)) {
-      var builder = logger.atLevel(Level.valueOf(level));
+    try (MDC.MDCCloseable ignored = MDC.putCloseable("eventId", id)) {
+      LoggingEventBuilder builder = logger.atLevel(Level.valueOf(level));
       if (exception) builder.setCause(scenario.failure());
       builder.log("[{}] {}", origin, scenario.message());
     }

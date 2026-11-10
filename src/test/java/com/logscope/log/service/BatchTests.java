@@ -5,6 +5,7 @@ import static org.mockito.Mockito.*;
 
 import com.logscope.log.controller.LogController;
 import com.logscope.log.controller.support.LogBodyReader;
+import com.logscope.log.dto.LogResponses.BatchReceipt;
 import com.logscope.log.exception.LogApiException;
 import com.logscope.log.repository.LogRepository;
 import org.junit.jupiter.api.Test;
@@ -18,7 +19,7 @@ class BatchTests {
       """;
 
   private MockHttpServletRequest request(String body) {
-    var request = new MockHttpServletRequest();
+    MockHttpServletRequest request = new MockHttpServletRequest();
     request.setContentType("application/json");
     request.setContent(body.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     return request;
@@ -26,9 +27,9 @@ class BatchTests {
 
   @Test
   void countsStoredDuplicatesAndRejectedItems() throws Exception {
-    var store = mock(LogRepository.class);
+    LogRepository store = mock(LogRepository.class);
     when(store.insert(any())).thenReturn(true, false);
-    var receipt =
+    BatchReceipt receipt =
         new LogController(new LogService(store), new LogBodyReader())
             .collectBatch(request("[" + EVENT + ",{}," + EVENT + "]"));
     assertThat(receipt.stored()).isEqualTo(1);
@@ -40,10 +41,10 @@ class BatchTests {
 
   @Test
   void rejectsOversizedItemAndContinuesWithValidEvent() throws Exception {
-    var store = mock(LogRepository.class);
+    LogRepository store = mock(LogRepository.class);
     when(store.insert(any())).thenReturn(true);
     String huge = EVENT.replace("Synthetic", "a".repeat(262144));
-    var result =
+    BatchReceipt result =
         new LogController(new LogService(store), new LogBodyReader())
             .collectBatch(request("[" + huge + "," + EVENT + "]"));
     assertThat(result.stored()).isEqualTo(1);
@@ -53,7 +54,7 @@ class BatchTests {
 
   @Test
   void propagatesTransientStoreFailureSoCollectorCanRetry() {
-    var store = mock(LogRepository.class);
+    LogRepository store = mock(LogRepository.class);
     when(store.insert(any())).thenThrow(new DataAccessResourceFailureException("Synthetic outage"));
     assertThatThrownBy(
             () ->
@@ -64,7 +65,7 @@ class BatchTests {
 
   @Test
   void rejectsBadEnvelopesBeforeCallingStore() {
-    var store = mock(LogRepository.class);
+    LogRepository store = mock(LogRepository.class);
     for (String body :
         java.util.List.of("[]", "{}", "null", "[{}] trailing", "[" + "{},".repeat(100) + "{}]"))
       assertThatThrownBy(
